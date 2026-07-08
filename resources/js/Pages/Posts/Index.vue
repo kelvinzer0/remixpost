@@ -7,6 +7,14 @@ defineProps({
     filters: Object,
 });
 
+const formatDate = (date) => {
+    if (!date) return '—';
+    return new Date(date).toLocaleString('id-ID', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
+    });
+};
+
 const statusColors = {
     draft: 'bg-gray-100 text-gray-700',
     scheduled: 'bg-yellow-100 text-yellow-700',
@@ -70,7 +78,7 @@ const statusColors = {
                             </div>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-500">
-                            {{ post.scheduled_at ? new Date(post.scheduled_at).toLocaleString() : '—' }}
+                            {{ post.scheduled_at ? formatDate(post.scheduled_at) : '—' }}
                         </td>
                         <td class="px-6 py-4">
                             <span class="px-2 py-1 text-xs font-medium rounded-full capitalize"

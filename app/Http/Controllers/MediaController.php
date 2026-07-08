@@ -24,11 +24,12 @@ class MediaController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|max:10240', // 10MB max
+            'file' => 'required|file|max:102400', // 100MB max
         ]);
 
         $file = $request->file('file');
-        $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+        $originalExt = $file->getClientOriginalExtension() ?: 'bin';
+        $filename = time() . '_' . uniqid() . '.' . $originalExt;
         $path = $file->storeAs('uploads', $filename, 'public');
 
         $media = $request->user()->media()->create([

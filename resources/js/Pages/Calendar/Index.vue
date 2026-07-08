@@ -50,7 +50,7 @@ const isToday = (date) => {
            date.getFullYear() === today.getFullYear();
 };
 
-const monthName = new Date(year, month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+const monthName = new Date(year, month, 1).toLocaleString('id-ID', { month: 'long', year: 'numeric' });
 const prevMonth = () => {
     const d = new Date(year, month - 1, 1);
     return `/calendar?month=${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

@@ -58,10 +58,14 @@ class PostController extends Controller
             'scheduled_at' => ['required', 'date', 'after:now'],
         ]);
 
+        // datetime-local input sends naive local time (e.g. "2026-07-08T22:59")
+        // Parse it in app timezone so it's stored correctly
+        $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone'));
+
         $post = $request->user()->posts()->create([
             'content' => $validated['content'],
             'media_urls' => $validated['media_urls'] ?? [],
-            'scheduled_at' => $validated['scheduled_at'],
+            'scheduled_at' => $scheduledAt,
             'status' => Post::STATUS_SCHEDULED,
         ]);
 
@@ -132,7 +136,7 @@ class PostController extends Controller
         $post->update([
             'content' => $validated['content'],
             'media_urls' => $validated['media_urls'] ?? [],
-            'scheduled_at' => $validated['scheduled_at'],
+            'scheduled_at' => \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone')),
             'status' => Post::STATUS_SCHEDULED,
             'failure_reason' => null,
         ]);
