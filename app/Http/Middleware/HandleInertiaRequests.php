@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\PlatformRequirements;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Middleware;
@@ -28,6 +29,7 @@ class HandleInertiaRequests extends Middleware
                 'message' => fn () => $request->session()->get('message'),
                 'error' => fn () => $request->session()->get('error'),
             ],
+            'platformRequirements' => fn () => PlatformRequirements::all(),
         ]);
     }
 }

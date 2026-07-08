@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Post;
 use App\Models\SocialAccount;
+use App\Services\PlatformRequirements;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -57,6 +58,26 @@ class PostController extends Controller
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
         ]);
+
+        // Per-platform requirement check (defensive — frontend already prevents submit)
+        $providers = $request->user()
+            ->socialAccounts()
+            ->whereIn('id', $validated['account_ids'])
+            ->pluck('provider')
+            ->unique()
+            ->toArray();
+
+        $errors = PlatformRequirements::validate(
+            $providers,
+            $validated['content'],
+            $validated['media_urls'] ?? []
+        );
+
+        if (!empty($errors)) {
+            return back()
+                ->withErrors(['account_ids' => implode(' ', $errors)])
+                ->withInput();
+        }
 
         // datetime-local input sends naive local time (e.g. "2026-07-08T22:59")
         // Parse it in app timezone so it's stored correctly
@@ -132,6 +153,26 @@ class PostController extends Controller
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
         ]);
+
+        // Per-platform requirement check (defensive — frontend already prevents submit)
+        $providers = $request->user()
+            ->socialAccounts()
+            ->whereIn('id', $validated['account_ids'])
+            ->pluck('provider')
+            ->unique()
+            ->toArray();
+
+        $errors = PlatformRequirements::validate(
+            $providers,
+            $validated['content'],
+            $validated['media_urls'] ?? []
+        );
+
+        if (!empty($errors)) {
+            return back()
+                ->withErrors(['account_ids' => implode(' ', $errors)])
+                ->withInput();
+        }
 
         $post->update([
             'content' => $validated['content'],
