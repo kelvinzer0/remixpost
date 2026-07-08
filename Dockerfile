@@ -33,6 +33,8 @@ COPY . .
 
 # Generate autoloader + build assets
 RUN composer dump-autoload --no-scripts --optimize
+# Force clean Vite build (remove stale cached assets)
+RUN rm -rf public/build
 RUN npm run build
 
 # ============================================================================
