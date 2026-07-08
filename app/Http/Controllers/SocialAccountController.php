@@ -2,8 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SocialAccount;
+use GuzzleHttp\Client;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
+use Laravel\Socialite\Facades\Socialite;
 
 class SocialAccountController extends Controller
 {
@@ -19,17 +25,178 @@ class SocialAccountController extends Controller
         ]);
     }
 
+    /**
+     * Redirect to provider's OAuth consent screen.
+     */
     public function redirectToProvider(Request $request, string $provider)
     {
-        // TODO: Implement OAuth redirect per provider
-        // For MVP: stub that will be wired in next iteration
-        return back()->with('error', "Provider {$provider} connection not yet implemented. Coming soon.");
+        $allowed = ['twitter', 'facebook', 'linkedin'];
+        if (!in_array($provider, $allowed)) {
+            return back()->with('error', "Provider {$provider} is not supported.");
+        }
+
+        // Store intended user_id in session (for callback)
+        session(['oauth_user_id' => $request->user()->id]);
+
+        return Socialite::driver($provider)->scopes(
+            config("services.{$provider}.scopes", [])
+        )->redirect();
     }
 
+    /**
+     * Handle OAuth callback from provider.
+     */
     public function handleProviderCallback(Request $request, string $provider)
     {
-        // TODO: Implement OAuth callback
-        return redirect()->route('social-accounts.index');
+        $allowed = ['twitter', 'facebook', 'linkedin'];
+        if (!in_array($provider, $allowed)) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', "Provider {$provider} is not supported.");
+        }
+
+        if ($request->has('error')) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Authorization was cancelled or failed.');
+        }
+
+        try {
+            $socialiteUser = Socialite::driver($provider)->user();
+            $userId = session('oauth_user_id', Auth::id());
+
+            // For Facebook: user must select a Page to post as.
+            // We'll redirect to Page selection after getting user token.
+            if ($provider === 'facebook') {
+                $pages = $this->getFacebookPages(
+                    $socialiteUser->token,
+                    config('services.facebook.graph_version', 'v18.0')
+                );
+
+                if (empty($pages)) {
+                    return redirect()->route('social-accounts.index')
+                        ->with('error', 'No Facebook Pages found. You must be an admin of at least one Page.');
+                }
+
+                // Store user token in session for Page selection step
+                session([
+                    'fb_user_token' => $socialiteUser->token,
+                    'fb_user_name' => $socialiteUser->getName(),
+                    'fb_pages' => $pages,
+                ]);
+
+                return Inertia::render('SocialAccounts/SelectFacebookPage', [
+                    'pages' => $pages,
+                ]);
+            }
+
+            // Twitter and LinkedIn: store the account directly
+            $this->createSocialAccount($userId, $provider, $socialiteUser);
+
+            return redirect()->route('social-accounts.index')
+                ->with('message', ucfirst($provider) . ' account connected successfully.');
+
+        } catch (\Exception $e) {
+            Log::error("OAuth callback failed for {$provider}: " . $e->getMessage());
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Failed to connect ' . ucfirst($provider) . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Store selected Facebook Page as a social account.
+     */
+    public function selectFacebookPage(Request $request)
+    {
+        $validated = $request->validate([
+            'page_id' => 'required|string',
+        ]);
+
+        $pages = session('fb_pages', []);
+        $selectedPage = collect($pages)->firstWhere('id', $validated['page_id']);
+
+        if (!$selectedPage) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid Page selection.');
+        }
+
+        $userId = session('oauth_user_id', Auth::id());
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'facebook',
+                'provider_id' => $selectedPage['id'],
+            ],
+            [
+                'user_id' => $userId,
+                'name' => $selectedPage['name'],
+                'username' => $selectedPage['name'],
+                'avatar' => null,
+                'access_token' => $selectedPage['access_token'],
+                'refresh_token' => null,
+                'is_active' => true,
+            ]
+        );
+
+        session()->forget(['fb_user_token', 'fb_user_name', 'fb_pages', 'oauth_user_id']);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Facebook Page '{$selectedPage['name']}' connected successfully.");
+    }
+
+    /**
+     * Get Instagram Business Account ID from a connected Facebook Page.
+     * Called after Facebook Page is selected, to set up Instagram.
+     */
+    public function connectInstagram(Request $request)
+    {
+        $request->validate([
+            'facebook_account_id' => 'required|exists:social_accounts,id',
+        ]);
+
+        $fbAccount = SocialAccount::findOrFail($request->facebook_account_id);
+        $this->authorize('update', $fbAccount);
+
+        $graphVersion = config('services.facebook.graph_version', 'v18.0');
+        $pageId = $fbAccount->provider_id;
+        $pageToken = $fbAccount->access_token;
+
+        // Get IG business account ID from the Page
+        $response = Http::get("https://graph.facebook.com/{$graphVersion}/{$pageId}", [
+            'fields' => 'instagram_business_account',
+            'access_token' => $pageToken,
+        ]);
+
+        if (!$response->ok() || !isset($response['instagram_business_account']['id'])) {
+            return back()->with('error', 'This Facebook Page is not connected to an Instagram Business account.');
+        }
+
+        $igUserId = $response['instagram_business_account']['id'];
+
+        // Get IG profile info
+        $igResponse = Http::get("https://graph.facebook.com/{$graphVersion}/{$igUserId}", [
+            'fields' => 'username,profile_picture_url,name',
+            'access_token' => $pageToken,
+        ]);
+
+        $igData = $igResponse->json();
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'instagram',
+                'provider_id' => $igUserId,
+            ],
+            [
+                'user_id' => $request->user()->id,
+                'name' => $igData['name'] ?? $igData['username'] ?? 'Instagram',
+                'username' => $igData['username'] ?? null,
+                'avatar' => $igData['profile_picture_url'] ?? null,
+                'access_token' => $pageToken, // IG uses the Page access token
+                'refresh_token' => null,
+                'is_active' => true,
+            ]
+        );
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', 'Instagram Business account connected successfully.');
     }
 
     public function destroy(Request $request, int $id)
@@ -38,5 +205,57 @@ class SocialAccountController extends Controller
         $account->delete();
 
         return back()->with('message', 'Account disconnected successfully.');
+    }
+
+    /**
+     * Create or update a social account from Socialite user data.
+     */
+    private function createSocialAccount(int $userId, string $provider, $socialiteUser): void
+    {
+        $providerId = $socialiteUser->getId();
+
+        // For LinkedIn, store the URN format (urn:li:person:{id})
+        if ($provider === 'linkedin') {
+            $providerId = 'urn:li:person:' . $socialiteUser->getId();
+        }
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => $provider,
+                'provider_id' => $providerId,
+            ],
+            [
+                'user_id' => $userId,
+                'name' => $socialiteUser->getName() ?? $socialiteUser->getNickname() ?? 'Unknown',
+                'username' => $socialiteUser->getNickname() ?? $socialiteUser->getEmail(),
+                'avatar' => $socialiteUser->getAvatar(),
+                'access_token' => $socialiteUser->token,
+                'refresh_token' => $socialiteUser->refreshToken ?? method_exists($socialiteUser, 'getRefreshToken')
+                    ? $socialiteUser->getRefreshToken()
+                    : null,
+                'expires_at' => $socialiteUser->expiresIn
+                    ? now()->addSeconds($socialiteUser->expiresIn)
+                    : null,
+                'is_active' => true,
+            ]
+        );
+    }
+
+    /**
+     * Fetch Facebook Pages the user administers.
+     */
+    private function getFacebookPages(string $userToken, string $graphVersion): array
+    {
+        $response = Http::get("https://graph.facebook.com/{$graphVersion}/me/accounts", [
+            'access_token' => $userToken,
+            'fields' => 'id,name,access_token',
+            'limit' => 100,
+        ]);
+
+        if (!$response->ok()) {
+            return [];
+        }
+
+        return $response->json('data', []);
     }
 }

@@ -11,7 +11,7 @@ return new class extends Migration {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('provider'); // twitter, facebook, linkedin, instagram
-            $table->string('provider_id');
+            $table->string('provider_id'); // platform-specific ID (Page ID for FB, URN for LinkedIn)
             $table->string('name')->nullable();
             $table->string('username')->nullable();
             $table->string('avatar')->nullable();

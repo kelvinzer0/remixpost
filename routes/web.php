@@ -24,9 +24,12 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
+    // Social accounts — OAuth flow
     Route::get('/social-accounts', [SocialAccountController::class, 'index'])->name('social-accounts.index');
     Route::get('/social-accounts/connect/{provider}', [SocialAccountController::class, 'redirectToProvider'])->name('social-accounts.connect');
     Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
+    Route::post('/social-accounts/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
+    Route::post('/social-accounts/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');
 
     Route::resource('posts', PostController::class);
