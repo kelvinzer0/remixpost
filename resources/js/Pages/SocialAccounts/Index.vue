@@ -108,10 +108,10 @@ const manualProviders = providers.filter(p => !p.oauth);
                     </div>
                     <p class="mt-3 text-sm font-medium text-gray-900">{{ provider.name }}</p>
                     <p v-if="provider.note" class="text-xs text-gray-400">{{ provider.note }}</p>
-                    <Link :href="`/social-accounts/connect/${provider.id}`"
+                    <a :href="`/social-accounts/connect/${provider.id}`"
                         class="mt-3 block w-full py-2 text-xs font-medium text-center text-white bg-brand-600 rounded-md hover:bg-brand-700">
                         Connect
-                    </Link>
+                    </a>
                 </div>
             </div>
 
