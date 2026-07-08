@@ -89,50 +89,28 @@ class SocialAccountController extends Controller
 
             // Twitter and LinkedIn: store the account directly
             // YouTube: SocialiteProviders driver calls YouTube API which can 401
-            // for accounts without a channel. Fall back to Google userinfo.
+            // for brand accounts. Fallback: manual token exchange + channel selection.
             if ($provider === 'youtube') {
-                try {
-                    $socialiteUser = Socialite::driver('youtube')->user();
-                } catch (\Exception $youtubeEx) {
-                    // YouTube API 401 — try getting user from Google userinfo
-                    Log::warning("YouTube API failed, trying Google userinfo: " . $youtubeEx->getMessage());
+                $youtubeResult = $this->handleYouTubeCallback($request);
 
-                    // Get access token manually from Google
-                    $tokenResponse = Http::post('https://oauth2.googleapis.com/token', [
-                        'code' => $request->get('code'),
-                        'client_id' => config('services.youtube.client_id'),
-                        'client_secret' => config('services.youtube.client_secret'),
-                        'redirect_uri' => url('/integrations/social/youtube'),
-                        'grant_type' => 'authorization_code',
-                    ])->json();
-
-                    $accessToken = $tokenResponse['access_token'] ?? null;
-                    if (!$accessToken) {
-                        throw $youtubeEx;
-                    }
-
-                    // Get user info from Google (not YouTube)
-                    $googleUser = Http::withToken($accessToken)
-                        ->get('https://www.googleapis.com/oauth2/v2/userinfo')
-                        ->json();
-
-                    if (!isset($googleUser['id'])) {
-                        throw $youtubeEx;
-                    }
-
-                    // Create a simple object mimicking Socialite User
-                    $socialiteUser = new \Laravel\Socialite\Two\User();
-                    $socialiteUser->id = $googleUser['id'];
-                    $socialiteUser->name = $googleUser['name'] ?? $googleUser['email'] ?? 'YouTube User';
-                    $socialiteUser->email = $googleUser['email'] ?? null;
-                    $socialiteUser->avatar = $googleUser['picture'] ?? null;
-                    $socialiteUser->token = $accessToken;
-                    $socialiteUser->refreshToken = $tokenResponse['refresh_token'] ?? null;
-                    $socialiteUser->expiresIn = $tokenResponse['expires_in'] ?? null;
-
-                    Log::info("YouTube: using Google userinfo fallback for user: " . $googleUser['email']);
+                if ($youtubeResult['type'] === 'select_channel') {
+                    // Multiple channels (personal + brand) — show picker
+                    session([
+                        'yt_access_token' => $youtubeResult['access_token'],
+                        'yt_refresh_token' => $youtubeResult['refresh_token'] ?? null,
+                        'yt_expires_in' => $youtubeResult['expires_in'] ?? null,
+                        'yt_channels' => $youtubeResult['channels'],
+                        'oauth_user_id' => $userId,
+                    ]);
+                    return Inertia::render('SocialAccounts/SelectYoutubeChannel', [
+                        'channels' => $youtubeResult['channels'],
+                    ]);
                 }
+
+                // Single channel or fallback — store directly
+                $socialiteUser = $youtubeResult['user'];
             }
+
             $this->createSocialAccount($userId, $provider, $socialiteUser);
 
             return redirect()->route('social-accounts.index')
@@ -143,6 +121,188 @@ class SocialAccountController extends Controller
             return redirect()->route('social-accounts.index')
                 ->with('error', 'Failed to connect ' . ucfirst($provider) . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Handle YouTube OAuth callback — supports personal + brand accounts.
+     *
+     * Brand accounts need channels?managedByMe=true to be detected.
+     * If multiple channels found (personal + brand), return channel list
+     * for user selection (similar to Facebook Page selection).
+     */
+    private function handleYouTubeCallback(Request $request): array
+    {
+        // Step 1: Try Socialite normal flow (works for personal accounts)
+        try {
+            $socialiteUser = Socialite::driver('youtube')->user();
+        } catch (\Exception $e) {
+            Log::warning("YouTube Socialite failed: " . $e->getMessage());
+            $socialiteUser = null;
+        }
+
+        // Step 2: If Socialite worked, get access token
+        if ($socialiteUser) {
+            $accessToken = $socialiteUser->token;
+            $refreshToken = $socialiteUser->refreshToken ?? null;
+            $expiresIn = $socialiteUser->expiresIn ?? null;
+        } else {
+            // Step 3: Fallback — manual token exchange
+            $tokenResponse = Http::post('https://oauth2.googleapis.com/token', [
+                'code' => $request->get('code'),
+                'client_id' => config('services.youtube.client_id'),
+                'client_secret' => config('services.youtube.client_secret'),
+                'redirect_uri' => url('/integrations/social/youtube'),
+                'grant_type' => 'authorization_code',
+            ])->json();
+
+            $accessToken = $tokenResponse['access_token'] ?? null;
+            $refreshToken = $tokenResponse['refresh_token'] ?? null;
+            $expiresIn = $tokenResponse['expires_in'] ?? null;
+
+            if (!$accessToken) {
+                throw new \Exception('Failed to get Google access token');
+            }
+        }
+
+        // Step 4: Fetch ALL channels (personal + brand/managed)
+        $channels = [];
+
+        // Try personal channel (mine=true)
+        try {
+            $mineResponse = Http::withToken($accessToken)
+                ->get('https://www.googleapis.com/youtube/v3/channels', [
+                    'part' => 'snippet,contentDetails',
+                    'mine' => 'true',
+                ])->json();
+
+            if (isset($mineResponse['items'])) {
+                foreach ($mineResponse['items'] as $ch) {
+                    $channels[] = [
+                        'id' => $ch['id'],
+                        'title' => $ch['snippet']['title'] ?? 'YouTube Channel',
+                        'thumbnail' => $ch['snippet']['thumbnails']['default']['url'] ?? null,
+                        'type' => 'personal',
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning("YouTube mine=true failed: " . $e->getMessage());
+        }
+
+        // Try brand/managed channels (managedByMe=true)
+        try {
+            $managedResponse = Http::withToken($accessToken)
+                ->get('https://www.googleapis.com/youtube/v3/channels', [
+                    'part' => 'snippet,contentDetails',
+                    'managedByMe' => 'true',
+                    'maxResults' => 50,
+                ])->json();
+
+            if (isset($managedResponse['items'])) {
+                foreach ($managedResponse['items'] as $ch) {
+                    $channels[] = [
+                        'id' => $ch['id'],
+                        'title' => $ch['snippet']['title'] ?? 'Brand Channel',
+                        'thumbnail' => $ch['snippet']['thumbnails']['default']['url'] ?? null,
+                        'type' => 'brand',
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning("YouTube managedByMe=true failed: " . $e->getMessage());
+        }
+
+        Log::info("YouTube: found " . count($channels) . " channel(s)");
+
+        // Step 5: If multiple channels → return for selection
+        if (count($channels) > 1) {
+            return [
+                'type' => 'select_channel',
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'expires_in' => $expiresIn,
+                'channels' => $channels,
+            ];
+        }
+
+        // Step 6: Single channel or no channel — create user object
+        if (count($channels) === 1) {
+            $ch = $channels[0];
+            $user = new \Laravel\Socialite\Two\User();
+            $user->id = $ch['id'];
+            $user->name = $ch['title'];
+            $user->avatar = $ch['thumbnail'];
+            $user->token = $accessToken;
+            $user->refreshToken = $refreshToken;
+            $user->expiresIn = $expiresIn;
+            return ['type' => 'user', 'user' => $user];
+        }
+
+        // Step 7: No channels at all — fallback to Google userinfo
+        $googleUser = Http::withToken($accessToken)
+            ->get('https://www.googleapis.com/oauth2/v2/userinfo')
+            ->json();
+
+        if (!isset($googleUser['id'])) {
+            throw new \Exception('Could not get YouTube channel or Google user info');
+        }
+
+        $user = new \Laravel\Socialite\Two\User();
+        $user->id = $googleUser['id'];
+        $user->name = $googleUser['name'] ?? $googleUser['email'] ?? 'YouTube User';
+        $user->email = $googleUser['email'] ?? null;
+        $user->avatar = $googleUser['picture'] ?? null;
+        $user->token = $accessToken;
+        $user->refreshToken = $refreshToken;
+        $user->expiresIn = $expiresIn;
+
+        Log::info("YouTube: no channels found, using Google userinfo: " . ($googleUser['email'] ?? 'unknown'));
+
+        return ['type' => 'user', 'user' => $user];
+    }
+
+    /**
+     * Store selected YouTube channel as social account.
+     */
+    public function selectYoutubeChannel(Request $request)
+    {
+        $validated = $request->validate([
+            'channel_id' => 'required|string',
+        ]);
+
+        $channels = session('yt_channels', []);
+        $selected = collect($channels)->firstWhere('id', $validated['channel_id']);
+
+        if (!$selected) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid channel selection.');
+        }
+
+        $userId = session('oauth_user_id', Auth::id());
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'youtube',
+                'provider_id' => $selected['id'],
+            ],
+            [
+                'user_id' => $userId,
+                'name' => $selected['title'],
+                'username' => $selected['title'],
+                'avatar' => $selected['thumbnail'],
+                'access_token' => session('yt_access_token'),
+                'refresh_token' => session('yt_refresh_token'),
+                'expires_at' => session('yt_expires_in')
+                    ? now()->addSeconds(session('yt_expires_in'))
+                    : null,
+                'is_active' => true,
+            ]
+        );
+
+        session()->forget(['yt_access_token', 'yt_refresh_token', 'yt_expires_in', 'yt_channels', 'oauth_user_id']);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "YouTube channel '{$selected['title']}' connected successfully.");
     }
 
     /**
