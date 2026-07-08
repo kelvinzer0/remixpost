@@ -47,7 +47,13 @@ class SocialAccountController extends Controller
             return $driver->redirect();
         }
 
-        return $driver->scopes($scopes)->redirect();
+        // Twitter uses OAuth1 (Socialite\One) which doesn't have scopes().
+        // Only call scopes() for OAuth2 providers.
+        if (!in_array($provider, ['twitter'])) {
+            $driver->scopes($scopes);
+        }
+
+        return $driver->redirect();
     }
 
     /**
