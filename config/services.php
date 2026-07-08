@@ -51,13 +51,18 @@ return [
         'client_id' => env('PINTEREST_CLIENT_ID'),
         'client_secret' => env('PINTEREST_CLIENT_SECRET'),
         'redirect' => '/integrations/social/pinterest',
-        // Scopes required for image AND video pin upload:
-        //   boards:read    — list user's boards (for board picker if needed)
-        //   pins:write     — create pins (image + video)
-        //   media:write    — register + upload media (required by POST /v5/media)
-        //   video:upload   — upload video content (Pinterest separates this from media:write)
-        //   user_accounts:read — verify account access (recommended)
-        'scopes' => ['boards:read', 'pins:write', 'media:write', 'user_accounts:read'],
+        // Pinterest scopes are COMMA-joined (not space-separated like LinkedIn).
+        // Required scopes (matching Postiz):
+        //   boards:read        — list user's boards (for board picker)
+        //   boards:write       — create boards (optional but Postiz includes it)
+        //   pins:read          — read existing pins
+        //   pins:write         — create pins (image + video); also covers /v5/media
+        //   user_accounts:read — verify account access
+        // NOTE: /v5/media endpoint uses pins:write scope (NOT a separate media:write scope).
+        //       The 401 "insufficient permissions" we saw earlier was caused by joining
+        //       scopes with space — Pinterest silently drops unknown/incorrectly-formatted
+        //       scopes, leaving the token without pins:write.
+        'scopes' => ['boards:read', 'boards:write', 'pins:read', 'pins:write', 'user_accounts:read'],
     ],
     'mastodon' => [
         'url' => env('MASTODON_URL', 'https://mastodon.social'),

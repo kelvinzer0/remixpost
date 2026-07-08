@@ -47,6 +47,14 @@ class SocialAccountController extends Controller
             return $driver->redirect();
         }
 
+        // Pinterest: SocialiteProviders Pinterest provider defaults to ['user_accounts:read']
+        // which would silently drop pins:write (required for /v5/media + /v5/pins).
+        // Use setScopes() to replace defaults entirely with our config scopes.
+        if ($provider === 'pinterest') {
+            $driver->setScopes($scopes);
+            return $driver->redirect();
+        }
+
         // Twitter uses OAuth1 (Socialite\One) which doesn't have scopes().
         // Only call scopes() for OAuth2 providers.
         if (!in_array($provider, ['twitter'])) {

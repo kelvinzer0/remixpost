@@ -5,38 +5,48 @@ namespace App\Services\Publishers;
 use App\Services\MediaType;
 use Exception;
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
 
 /**
- * LinkedIn Publisher — posts to personal feed or Company Pages via API v2.
+ * LinkedIn Publisher — posts to personal feed or Company Pages via REST API.
  *
  * Authentication: OAuth 2.0 with access_token. Scope w_member_social for personal,
  * rw_organization_admin + w_organization_social + r_organization_social for Company Pages.
  *
- * API endpoints used:
- *   - POST https://api.linkedin.com/v2/ugcPosts (create post)
- *   - POST https://api.linkedin.com/v2/assets?action=registerUpload (register media upload)
- *   - GET  https://api.linkedin.com/v2/assets/{asset-id} (poll asset status for videos)
+ * API endpoints used (REST API, NOT legacy v2 Assets API):
+ *   - POST https://api.linkedin.com/rest/videos?action=initializeUpload (register video upload)
+ *   - POST https://api.linkedin.com/rest/images?action=initializeUpload (register image upload)
+ *   - PUT  {uploadUrl} (chunked 2MB PUTs for video, single PUT for image)
+ *   - POST https://api.linkedin.com/rest/videos?action=finalizeUpload (finalize video upload)
+ *   - GET  https://api.linkedin.com/rest/videos/{urn} (poll video status until AVAILABLE)
+ *   - GET  https://api.linkedin.com/rest/images/{urn} (poll image status until AVAILABLE)
+ *   - POST https://api.linkedin.com/rest/posts (create the post)
  *
- * Supported media:
- *   - Images: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-image
- *   - Videos: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-video
- *     Then poll asset status until AVAILABLE before posting ugcPosts
- *   - shareMediaCategory: IMAGE for image-only, VIDEO for video-only, NONE for text-only
+ * Required headers on every REST call:
+ *   - Content-Type: application/json
+ *   - X-Restli-Protocol-Version: 2.0.0
+ *   - LinkedIn-Version: 202601  ← mandatory, omitting causes 403/400
+ *   - Authorization: Bearer {token}
  *
  * Reference:
- *   https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/ugc-post-api
- *   https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/video-upload-api
+ *   https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api
+ *   https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/images-api
+ *   https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/posts-api
  *
- * @license Apache-2.0 (implemented from official API docs, not derived from third-party code)
+ * Pattern adapted from Postiz (github.com/gitroomhq/postiz-app).
+ *
+ * @license Apache-2.0 (pattern adapted from Postiz open-source project)
  */
 class LinkedInPublisher implements PublisherInterface
 {
     private Client $httpClient;
+    private const LINKEDIN_VERSION = '202601';
+    private const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB — LinkedIn Videos API max chunk size
 
     public function __construct()
     {
         $this->httpClient = new Client([
-            'timeout' => 300, // 5 min for large video uploads + status polling
+            'timeout' => 600, // 10 min for large video upload + status polling
             'connect_timeout' => 10,
         ]);
     }
@@ -54,22 +64,6 @@ class LinkedInPublisher implements PublisherInterface
                 $authorUrn = 'urn:li:person:' . $authorUrn;
             }
 
-            $ugcPost = [
-                'author' => $authorUrn,
-                'lifecycleState' => 'PUBLISHED',
-                'specificContent' => [
-                    'com.linkedin.ugc.ShareContent' => [
-                        'shareCommentary' => [
-                            'text' => $content,
-                        ],
-                        'shareMediaCategory' => 'NONE',
-                    ],
-                ],
-                'visibility' => [
-                    'com.linkedin.ugc.MemberNetworkVisibility' => 'PUBLIC',
-                ],
-            ];
-
             // Categorize media
             $imageUrls = [];
             $videoUrls = [];
@@ -81,81 +75,84 @@ class LinkedInPublisher implements PublisherInterface
                 }
             }
 
+            // Build the post payload base (REST Posts API)
+            $postPayload = [
+                'author' => $authorUrn,
+                'commentary' => $this->fixText($content),
+                'visibility' => 'PUBLIC',
+                'distribution' => [
+                    'feedDistribution' => 'MAIN_FEED',
+                    'targetEntities' => [],
+                    'thirdPartyDistributionChannels' => [],
+                ],
+                'lifecycleState' => 'PUBLISHED',
+                'isReshareDisabledByAuthor' => false,
+            ];
+
             // Handle media — prefer images if mixed (LinkedIn only allows one category per post)
             if (!empty($imageUrls)) {
-                $media = [];
+                $mediaIds = [];
                 foreach ($imageUrls as $url) {
-                    $result = $this->uploadMedia($url, $accessToken, $authorUrn, 'image');
+                    $result = $this->uploadImage($url, $accessToken, $authorUrn);
                     if ($result['success']) {
-                        $media[] = [
-                            'status' => 'READY',
-                            'description' => ['text' => ''],
-                            'media' => $result['assetUrn'],
-                            'mediaType' => 'IMAGE',
-                        ];
-                    } else {
-                        // Log warning, continue with remaining images
-                        \Illuminate\Support\Facades\Log::warning('LinkedIn image upload failed', [
-                            'url' => $url,
-                            'error' => $result['error'],
-                        ]);
+                        $mediaIds[] = $result['assetUrn'];
                     }
                 }
-                if (!empty($media)) {
-                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'IMAGE';
-                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = $media;
+                if (!empty($mediaIds)) {
+                    if (count($mediaIds) === 1) {
+                        $postPayload['content'] = ['media' => ['id' => $mediaIds[0]]];
+                    } else {
+                        $postPayload['content'] = [
+                            'multiImage' => ['images' => array_map(fn($id) => ['id' => $id], $mediaIds)],
+                        ];
+                    }
                 }
             } elseif (!empty($videoUrls)) {
                 // Video post — single video only (LinkedIn limitation)
                 $url = $videoUrls[0];
-                $result = $this->uploadMedia($url, $accessToken, $authorUrn, 'video');
+                $result = $this->uploadVideo($url, $accessToken, $authorUrn);
                 if (!$result['success']) {
                     return [
                         'success' => false,
                         'error' => 'LinkedIn video upload failed: ' . $result['error'],
                     ];
                 }
-
-                // For video, MUST wait until asset status is AVAILABLE before ugcPost
-                $assetUrn = $result['assetUrn'];
-                $assetStatus = $this->waitForAssetReady($assetUrn, $accessToken);
-                if (!$assetStatus['ready']) {
-                    return [
-                        'success' => false,
-                        'error' => 'LinkedIn video processing failed or timed out: ' . ($assetStatus['error'] ?? 'Unknown'),
-                    ];
-                }
-
-                $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'VIDEO';
-                $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
-                    'status' => 'READY',
-                    'description' => ['text' => mb_substr($content, 0, 300)],
-                    'media' => $assetUrn,
-                    'mediaType' => 'VIDEO',
-                ]];
+                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
             }
 
-            $response = $this->httpClient->post('https://api.linkedin.com/v2/ugcPosts', [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $accessToken,
-                    'Content-Type' => 'application/json',
-                    'X-Restli-Protocol-Version' => '2.0.0',
-                ],
-                'json' => $ugcPost,
+            // Create the post via REST Posts API
+            $response = $this->httpClient->post('https://api.linkedin.com/rest/posts', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => $postPayload,
             ]);
 
-            $body = json_decode($response->getBody()->getContents(), true);
-
-            // LinkedIn returns the post URN in 'id' or 'activity' field
-            $externalId = $body['id'] ?? $body['activity'] ?? null;
+            // REST Posts API returns 201 on success, post ID in x-restli-id response header
+            $externalId = $response->getHeaderLine('x-restli-id');
+            if (!$externalId) {
+                // Fallback: try to parse from body
+                $body = json_decode($response->getBody()->getContents(), true);
+                $externalId = $body['id'] ?? $body['activity'] ?? null;
+            }
 
             if (!$externalId) {
+                $body = json_decode($response->getBody()->getContents(), true);
                 return ['success' => false, 'error' => 'LinkedIn did not return post ID', 'response' => $body];
             }
 
             return [
                 'success' => true,
                 'external_id' => $externalId,
+            ];
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            $resp = $e->getResponse();
+            $body = $resp ? json_decode($resp->getBody()->getContents(), true) : null;
+            $status = $resp ? $resp->getStatusCode() : null;
+            $err = $body['message'] ?? $e->getMessage();
+            return [
+                'success' => false,
+                'error' => "LinkedIn API {$status} error: {$err}",
+                'status' => $status,
+                'response' => $body,
             ];
         } catch (Exception $e) {
             return [
@@ -166,65 +163,46 @@ class LinkedInPublisher implements PublisherInterface
     }
 
     /**
-     * Upload media to LinkedIn using registerUpload flow.
-     * Uses feedshare-image recipe for images, feedshare-video recipe for videos.
-     * Returns ['success' => bool, 'assetUrn' => string|null, 'error' => string|null].
+     * Upload image via REST Images API.
+     * Flow: initializeUpload → single PUT to uploadUrl → poll until AVAILABLE.
      */
-    private function uploadMedia(string $url, string $accessToken, string $authorUrn, string $type = 'image'): array
+    private function uploadImage(string $url, string $accessToken, string $authorUrn): array
     {
         try {
-            $recipe = $type === 'video'
-                ? 'urn:li:digitalmediaRecipe:feedshare-video'
-                : 'urn:li:digitalmediaRecipe:feedshare-image';
-
-            // Step 1: Register upload to get upload URL
-            $registerResponse = $this->httpClient->post(
-                'https://api.linkedin.com/v2/assets?action=registerUpload',
-                [
-                    'headers' => [
-                        'Authorization' => 'Bearer ' . $accessToken,
-                        'Content-Type' => 'application/json',
-                    ],
-                    'json' => [
-                        'registerUploadRequest' => [
-                            'recipes' => [$recipe],
-                            'owner' => $authorUrn,
-                            'serviceRelationships' => [
-                                [
-                                    'relationshipType' => 'PROJECTION',
-                                    'identifier' => 'urn:li:userGeneratedContent',
-                                ],
-                            ],
-                        ],
-                    ],
-                ]
-            );
-
-            $registerBody = json_decode($registerResponse->getBody()->getContents(), true);
-            $assetUrn = $registerBody['value']['asset'] ?? null;
-            $uploadUrl = $registerBody['value']['uploadMechanism']
-                ['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl'] ?? null;
-
-            if (!$assetUrn || !$uploadUrl) {
-                return ['success' => false, 'assetUrn' => null, 'error' => 'registerUpload did not return asset or upload URL'];
-            }
-
-            // Step 2: Download media and upload to LinkedIn's upload URL
+            // Download image bytes
             $mediaResponse = $this->httpClient->get($url);
             $mediaData = $mediaResponse->getBody()->getContents();
-            $mediaMime = $mediaResponse->getHeaderLine('Content-Type') ?: (
-                $type === 'video' ? 'video/mp4' : 'application/octet-stream'
-            );
+            $mediaMime = $mediaResponse->getHeaderLine('Content-Type') ?: 'application/octet-stream';
 
-            // LinkedIn's upload URL expects binary data PUT.
-            // IMPORTANT: do NOT send Authorization header to the upload URL — it uses presigned URL auth
+            // Initialize upload
+            $initResp = $this->httpClient->post('https://api.linkedin.com/rest/images?action=initializeUpload', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => [
+                    'initializeUploadRequest' => [
+                        'owner' => $authorUrn,
+                    ],
+                ],
+            ]);
+            $initBody = json_decode($initResp->getBody()->getContents(), true);
+            $assetUrn = $initBody['value']['image'] ?? null;
+            $uploadUrl = $initBody['value']['uploadUrl'] ?? null;
+
+            if (!$assetUrn || !$uploadUrl) {
+                return ['success' => false, 'assetUrn' => null, 'error' => 'initializeUpload did not return image URN or upload URL'];
+            }
+
+            // Single PUT (images don't need chunking)
             $this->httpClient->put($uploadUrl, [
                 'headers' => [
+                    'Authorization' => 'Bearer ' . $accessToken,
                     'Content-Type' => $mediaMime,
                     'Content-Length' => strlen($mediaData),
                 ],
                 'body' => $mediaData,
             ]);
+
+            // Poll until AVAILABLE
+            $this->waitForMediaReady($assetUrn, $accessToken, 'images');
 
             return ['success' => true, 'assetUrn' => $assetUrn, 'error' => null];
         } catch (Exception $e) {
@@ -233,66 +211,175 @@ class LinkedInPublisher implements PublisherInterface
     }
 
     /**
-     * Poll LinkedIn asset status until AVAILABLE (for videos).
-     * For images, asset is immediately available so this returns quickly.
+     * Upload video via REST Videos API.
      *
-     * Returns ['ready' => bool, 'error' => string|null].
+     * Flow (adapted from Postiz):
+     *   1. initializeUpload with owner + fileSizeBytes + uploadCaptions=false + uploadThumbnail=false
+     *   2. Chunked PUT: split video into 2MB parts, PUT each to uploadUrl,
+     *      capture ETag response header from each chunk
+     *   3. finalizeUpload with video URN + uploadedPartIds (the ETags)
+     *   4. Poll GET /rest/videos/{urn} until status=AVAILABLE
      */
-    private function waitForAssetReady(string $assetUrn, string $accessToken): array
+    private function uploadVideo(string $url, string $accessToken, string $authorUrn): array
     {
-        // Extract asset ID from URN (e.g., urn:li:digitalmediaAsset:C5F10AAE8I89000...)
-        $assetId = strrpos($assetUrn, ':') !== false
-            ? substr($assetUrn, strrpos($assetUrn, ':') + 1)
-            : $assetUrn;
+        try {
+            // Download video bytes
+            $mediaResponse = $this->httpClient->get($url);
+            $mediaData = $mediaResponse->getBody()->getContents();
+            $fileSize = strlen($mediaData);
 
-        $maxAttempts = 60; // 60 attempts × 5s = 5 minutes max
-        $attempt = 0;
-
-        while ($attempt < $maxAttempts) {
-            $attempt++;
-            try {
-                $response = $this->httpClient->get(
-                    "https://api.linkedin.com/v2/assets/{$assetId}",
-                    [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $accessToken,
-                            'X-Restli-Protocol-Version' => '2.0.0',
-                        ],
-                    ]
-                );
-
-                $body = json_decode($response->getBody()->getContents(), true);
-                $status = $this->getAssetStatus($body);
-
-                if ($status === 'AVAILABLE') {
-                    return ['ready' => true, 'error' => null];
-                }
-                if (in_array($status, ['FAILED', 'CANCELLED'])) {
-                    return ['ready' => false, 'error' => "Asset status: {$status}"];
-                }
-
-                // Still processing — wait and retry
-                sleep(5);
-            } catch (Exception $e) {
-                // Transient error — wait and retry
-                sleep(5);
+            if ($fileSize === 0) {
+                return ['success' => false, 'assetUrn' => null, 'error' => 'Downloaded video is empty'];
             }
-        }
 
-        return ['ready' => false, 'error' => 'Timeout waiting for asset to become AVAILABLE'];
+            // Step 1: initializeUpload
+            $initResp = $this->httpClient->post('https://api.linkedin.com/rest/videos?action=initializeUpload', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => [
+                    'initializeUploadRequest' => [
+                        'owner' => $authorUrn,
+                        'fileSizeBytes' => $fileSize,
+                        'uploadCaptions' => false,
+                        'uploadThumbnail' => false,
+                    ],
+                ],
+            ]);
+            $initBody = json_decode($initResp->getBody()->getContents(), true);
+            $assetUrn = $initBody['value']['video'] ?? null;
+            $uploadInstructions = $initBody['value']['uploadInstructions'] ?? [];
+            $uploadUrl = $uploadInstructions[0]['uploadUrl'] ?? null;
+
+            if (!$assetUrn || !$uploadUrl) {
+                $err = 'initializeUpload did not return video URN or upload instructions';
+                Log::error('LinkedIn video initializeUpload failed', ['response' => $initBody]);
+                return ['success' => false, 'assetUrn' => null, 'error' => $err];
+            }
+
+            // Step 2: Chunked PUT — split video into 2MB parts, capture ETag from each response
+            $etags = [];
+            $chunks = str_split($mediaData, self::CHUNK_SIZE);
+            if ($chunks === false) {
+                $chunks = [$mediaData];
+            }
+
+            foreach ($chunks as $i => $chunk) {
+                $chunkResp = $this->httpClient->put($uploadUrl, [
+                    'headers' => [
+                        'X-Restli-Protocol-Version' => '2.0.0',
+                        'LinkedIn-Version' => self::LINKEDIN_VERSION,
+                        'Authorization' => 'Bearer ' . $accessToken,
+                        'Content-Type' => 'application/octet-stream',
+                    ],
+                    'body' => $chunk,
+                ]);
+                $etag = $chunkResp->getHeaderLine('ETag');
+                if (!$etag) {
+                    $etag = $chunkResp->getHeaderLine('etag');
+                }
+                if ($etag) {
+                    $etags[] = $etag;
+                }
+            }
+
+            // Step 3: finalizeUpload
+            $finalizeResp = $this->httpClient->post('https://api.linkedin.com/rest/videos?action=finalizeUpload', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => [
+                    'finalizeUploadRequest' => [
+                        'video' => $assetUrn,
+                        'uploadToken' => '',
+                        'uploadedPartIds' => $etags,
+                    ],
+                ],
+            ]);
+
+            // finalizeUpload returns 200 on success; body may be empty
+            if ($finalizeResp->getStatusCode() !== 200 && $finalizeResp->getStatusCode() !== 204) {
+                $body = json_decode($finalizeResp->getBody()->getContents(), true);
+                return ['success' => false, 'assetUrn' => null, 'error' => 'finalizeUpload failed: ' . ($body['message'] ?? 'Unknown')];
+            }
+
+            // Step 4: Poll until AVAILABLE
+            $this->waitForMediaReady($assetUrn, $accessToken, 'videos');
+
+            return ['success' => true, 'assetUrn' => $assetUrn, 'error' => null];
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            $resp = $e->getResponse();
+            $body = $resp ? json_decode($resp->getBody()->getContents(), true) : null;
+            return ['success' => false, 'assetUrn' => null, 'error' => $body['message'] ?? $e->getMessage()];
+        } catch (Exception $e) {
+            return ['success' => false, 'assetUrn' => null, 'error' => $e->getMessage()];
+        }
     }
 
     /**
-     * Extract asset status from LinkedIn API response.
-     * Status field can be in different locations depending on recipe.
+     * Poll GET /rest/{type}/{urn} until status=AVAILABLE.
+     * Max 20 attempts × 30s = 10 min (matches Postiz).
      */
-    private function getAssetStatus(array $body): ?string
+    private function waitForMediaReady(string $urn, string $accessToken, string $type = 'videos'): void
     {
-        // For videos: recipes[0].status
-        if (isset($body['recipes'][0]['status'])) {
-            return $body['recipes'][0]['status'];
+        $encodedUrn = urlencode($urn);
+        $maxAttempts = 20;
+        $intervalSec = 30;
+
+        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+            try {
+                $response = $this->httpClient->get(
+                    "https://api.linkedin.com/rest/{$type}/{$encodedUrn}",
+                    ['headers' => $this->apiHeaders($accessToken)]
+                );
+                $body = json_decode($response->getBody()->getContents(), true);
+                $status = $body['status'] ?? null;
+
+                if ($status === 'AVAILABLE') {
+                    return;
+                }
+                if ($status === 'PROCESSING_FAILED') {
+                    $reason = $body['processingFailureReason'] ?? 'Unknown';
+                    throw new Exception("LinkedIn {$type} processing failed: {$reason}");
+                }
+                // PROCESSING, WAITING_UPLOAD — keep polling
+            } catch (Exception $e) {
+                // Transient network error — wait and retry
+                Log::warning('LinkedIn asset status poll failed (will retry)', [
+                    'urn' => $urn,
+                    'attempt' => $attempt + 1,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            sleep($intervalSec);
         }
-        // Fallback: top-level status field
-        return $body['status'] ?? null;
+
+        throw new Exception("Timed out waiting for LinkedIn {$type} to become AVAILABLE (10 min max)");
+    }
+
+    /**
+     * Standard headers for every LinkedIn REST API call.
+     * LinkedIn-Version is mandatory — omitting causes 403/400.
+     */
+    private function apiHeaders(string $accessToken): array
+    {
+        return [
+            'Content-Type' => 'application/json',
+            'X-Restli-Protocol-Version' => '2.0.0',
+            'LinkedIn-Version' => self::LINKEDIN_VERSION,
+            'Authorization' => 'Bearer ' . $accessToken,
+        ];
+    }
+
+    /**
+     * Escape LinkedIn markdown metacharacters in commentary (adapted from Postiz).
+     * Prevents LinkedIn from interpreting < > # ~ _ | [ ] * ( ) { } @ as formatting.
+     */
+    private function fixText(string $text): string
+    {
+        // Escape backslash first
+        $text = str_replace('\\', '\\\\', $text);
+        // Escape each metacharacter
+        $metachars = ['<', '>', '#', '~', '_', '|', '[', ']', '*', '(', ')', '{', '}', '@'];
+        foreach ($metachars as $c) {
+            $text = str_replace($c, '\\' . $c, $text);
+        }
+        return $text;
     }
 }
