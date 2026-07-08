@@ -35,8 +35,15 @@ class PostController extends Controller
             ->where('is_active', true)
             ->get(['id', 'provider', 'name', 'username', 'avatar']);
 
+        $media = $request->user()
+            ->media()
+            ->orderBy('created_at', 'desc')
+            ->take(20)
+            ->get(['id', 'url', 'original_name', 'mime_type']);
+
         return Inertia::render('Posts/Create', [
             'accounts' => $accounts,
+            'media' => $media,
         ]);
     }
 

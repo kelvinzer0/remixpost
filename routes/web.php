@@ -36,5 +36,9 @@ Route::middleware('auth')->group(function () {
 
     Route::resource('posts', PostController::class);
 
+    Route::get('/media', [\App\Http\Controllers\MediaController::class, 'index'])->name('media.index');
+    Route::post('/media', [\App\Http\Controllers\MediaController::class, 'store'])->name('media.store');
+    Route::delete('/media/{id}', [\App\Http\Controllers\MediaController::class, 'destroy'])->name('media.destroy');
+
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
 });

@@ -78,9 +78,15 @@ const statusColors = {
                                 {{ post.status }}
                             </span>
                         </td>
-                        <td class="px-6 py-4 text-right text-sm">
+                        <td class="px-6 py-4 text-right text-sm space-x-3">
                             <Link :href="`/posts/${post.id}`"
                                 class="text-brand-600 hover:text-brand-900">View</Link>
+                            <Link v-if="['draft', 'scheduled', 'failed'].includes(post.status)"
+                                :href="`/posts/${post.id}/edit`"
+                                class="text-indigo-600 hover:text-indigo-900">Edit</Link>
+                            <Link :href="`/posts/${post.id}`" method="delete" as="button"
+                                class="text-red-600 hover:text-red-900"
+                                onclick="return confirm('Delete this post?')">Delete</Link>
                         </td>
                     </tr>
                 </tbody>

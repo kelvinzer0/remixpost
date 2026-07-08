@@ -1,9 +1,11 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
-defineProps({
+const props = defineProps({
     accounts: Array,
+    media: Array,
 });
 
 const form = useForm({
@@ -12,6 +14,8 @@ const form = useForm({
     account_ids: [],
     scheduled_at: '',
 });
+
+const showMediaPicker = ref(false);
 
 const providers = [
     { id: 'twitter', name: 'Twitter/X', color: 'bg-black' },
@@ -77,6 +81,42 @@ const minDate = () => {
                         </label>
                     </div>
                     <p v-if="form.errors.account_ids" class="mt-1 text-sm text-red-600">{{ form.errors.account_ids }}</p>
+                </div>
+
+                <!-- Media selection -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Media (optional)</label>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        <div v-for="(url, i) in form.media_urls" :key="i"
+                            class="relative group">
+                            <img :src="url" class="w-20 h-20 object-cover rounded-md border border-gray-200" />
+                            <button type="button" @click="form.media_urls.splice(i, 1)"
+                                class="absolute -top-2 -right-2 w-5 h-5 bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100">
+                                ×
+                            </button>
+                        </div>
+                        <button type="button" @click="showMediaPicker = !showMediaPicker"
+                            class="w-20 h-20 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center text-gray-400 hover:border-brand-400 hover:text-brand-600">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Media picker -->
+                    <div v-if="showMediaPicker" class="mt-2 p-4 border border-gray-200 rounded-md max-h-64 overflow-y-auto">
+                        <div class="grid grid-cols-4 gap-2">
+                            <button v-for="item in (props.media || [])" :key="item.id"
+                                type="button"
+                                @click="form.media_urls.push(item.url); showMediaPicker = false"
+                                class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
+                                <img :src="item.url" class="w-full h-16 object-cover" />
+                            </button>
+                        </div>
+                        <p v-if="!props.media || props.media.length === 0" class="text-xs text-gray-400 text-center py-4">
+                            No media uploaded. <Link href="/media" class="text-brand-600 underline">Upload some first</Link>.
+                        </p>
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Upload media in the <Link href="/media" class="text-brand-600">Media Manager</Link>, then select here.</p>
                 </div>
 
                 <!-- Schedule -->
