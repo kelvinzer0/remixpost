@@ -2,6 +2,7 @@
 
 namespace App\Services\Publishers;
 
+use App\Services\MediaType;
 use Exception;
 use GuzzleHttp\Client;
 
@@ -12,10 +13,20 @@ use GuzzleHttp\Client;
  * The Page access token (stored in SocialAccount.access_token) is used to publish.
  *
  * API endpoints used:
- *   - POST https://graph.facebook.com/v18.0/{page-id}/feed (text post)
- *   - POST https://graph.facebook.com/v18.0/{page-id}/photos (image post)
+ *   - POST https://graph.facebook.com/v18.0/{page-id}/feed   (text post + multi-photo post)
+ *   - POST https://graph.facebook.com/v18.0/{page-id}/photos (image staging or published photo)
+ *   - POST https://graph.facebook.com/v18.0/{page-id}/videos (video upload, separate endpoint)
  *
  * Reference: https://developers.facebook.com/docs/pages-api
+ *            https://developers.facebook.com/docs/videos
+ *
+ * Media handling:
+ *   - Text only           → /feed with message only
+ *   - Single image        → /photos with published=true
+ *   - Single video        → /videos with file_url + description
+ *   - Multiple images     → stage all via /photos, then /feed with attached_media
+ *   - Mixed image+video   → publish first video via /videos, then images via separate /photos
+ *                           (Facebook doesn't support mixed media in one post)
  *
  * @license Apache-2.0 (implemented from official API docs, not derived from third-party code)
  */
@@ -27,7 +38,7 @@ class FacebookPublisher implements PublisherInterface
     public function __construct()
     {
         $this->httpClient = new Client([
-            'timeout' => 30,
+            'timeout' => 300, // 5 min for large video uploads
             'connect_timeout' => 10,
         ]);
     }
@@ -42,18 +53,50 @@ class FacebookPublisher implements PublisherInterface
 
             $baseUrl = "https://graph.facebook.com/{$this->apiVersion}/{$pageId}";
 
-            // Single image: use /photos with published=true (creates a post)
-            if (count($mediaUrls) === 1) {
-                return $this->publishSinglePhoto($baseUrl, $content, $mediaUrls[0], $pageAccessToken);
+            // No media → text-only post
+            if (empty($mediaUrls)) {
+                return $this->publishTextOnly($baseUrl, $content, $pageAccessToken);
             }
 
-            // Multiple images: use /feed with attached_media
-            if (count($mediaUrls) > 1) {
-                return $this->publishMultiPhotos($baseUrl, $content, $mediaUrls, $pageAccessToken);
+            // Categorize media
+            $categorized = MediaType::categorize($mediaUrls);
+            $images = $categorized['images'];
+            $videos = $categorized['videos'];
+
+            // Single video → /videos endpoint
+            if (count($videos) === 1 && empty($images)) {
+                return $this->publishSingleVideo($baseUrl, $content, $videos[0], $pageAccessToken);
             }
 
-            // Text only: use /feed
+            // Single image → /photos with published=true
+            if (count($images) === 1 && empty($videos)) {
+                return $this->publishSinglePhoto($baseUrl, $content, $images[0], $pageAccessToken);
+            }
+
+            // Multiple videos → publish first as /videos (Facebook doesn't support multi-video post)
+            // Subsequent videos are skipped with warning (FB API limitation)
+            if (count($videos) > 1 && empty($images)) {
+                $result = $this->publishSingleVideo($baseUrl, $content, $videos[0], $pageAccessToken);
+                if ($result['success']) {
+                    $result['warning'] = 'Facebook only supports one video per post. Only the first video was published; ' . (count($videos) - 1) . ' video(s) skipped.';
+                }
+                return $result;
+            }
+
+            // Multiple images (no video) → stage + /feed with attached_media
+            if (count($images) > 1 && empty($videos)) {
+                return $this->publishMultiPhotos($baseUrl, $content, $images, $pageAccessToken);
+            }
+
+            // Mixed images + videos → publish first video via /videos, images as separate /photos
+            // (Facebook has no API for mixed-media posts)
+            if (!empty($videos) && !empty($images)) {
+                return $this->publishMixedMedia($baseUrl, $content, $videos, $images, $pageAccessToken);
+            }
+
+            // Fallback (should not reach here)
             return $this->publishTextOnly($baseUrl, $content, $pageAccessToken);
+
         } catch (Exception $e) {
             return [
                 'success' => false,
@@ -106,6 +149,32 @@ class FacebookPublisher implements PublisherInterface
         ];
     }
 
+    /**
+     * Publish a single video to Facebook Page via /videos endpoint.
+     * Note: 'description' is used for video (not 'message').
+     */
+    private function publishSingleVideo(string $baseUrl, string $description, string $videoUrl, string $accessToken): array
+    {
+        $response = $this->httpClient->post("{$baseUrl}/videos", [
+            'form_params' => [
+                'description' => $description,
+                'file_url' => $videoUrl,
+                'access_token' => $accessToken,
+            ],
+        ]);
+
+        $body = json_decode($response->getBody()->getContents(), true);
+
+        if (!isset($body['id'])) {
+            return ['success' => false, 'error' => 'Facebook did not return video post ID', 'response' => $body];
+        }
+
+        return [
+            'success' => true,
+            'external_id' => $body['id'],
+        ];
+    }
+
     private function publishMultiPhotos(string $baseUrl, string $message, array $imageUrls, string $accessToken): array
     {
         // Step 1: Upload each photo as unpublished (staged)
@@ -146,6 +215,43 @@ class FacebookPublisher implements PublisherInterface
         return [
             'success' => true,
             'external_id' => $body['id'],
+        ];
+    }
+
+    /**
+     * Publish mixed media: first video via /videos, then images as separate /photos.
+     * Facebook doesn't support mixed image+video in a single post, so we create
+     * one video post + one image post (with text on the video, no text on images).
+     */
+    private function publishMixedMedia(string $baseUrl, string $content, array $videoUrls, array $imageUrls, string $accessToken): array
+    {
+        // Publish first video with the caption
+        $videoResult = $this->publishSingleVideo($baseUrl, $content, $videoUrls[0], $accessToken);
+        if (!$videoResult['success']) {
+            return $videoResult;
+        }
+
+        // Publish remaining images as a separate multi-photo post (no caption since it's already on video)
+        if (count($imageUrls) === 1) {
+            // Single image: publish as separate photo with empty message
+            $imageResult = $this->publishSinglePhoto($baseUrl, '', $imageUrls[0], $accessToken);
+        } else {
+            $imageResult = $this->publishMultiPhotos($baseUrl, '', $imageUrls, $accessToken);
+        }
+
+        if (!$imageResult['success']) {
+            // Video was posted, but images failed — partial success
+            return [
+                'success' => true,
+                'external_id' => $videoResult['external_id'],
+                'warning' => 'Video posted successfully, but image(s) failed: ' . ($imageResult['error'] ?? 'Unknown'),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'external_id' => $videoResult['external_id'],
+            'warning' => 'Facebook does not support mixed media in one post. Created 2 separate posts: 1 video + ' . count($imageUrls) . ' image(s).',
         ];
     }
 }

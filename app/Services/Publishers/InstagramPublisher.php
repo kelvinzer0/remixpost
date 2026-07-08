@@ -185,13 +185,11 @@ class InstagramPublisher implements PublisherInterface
 
     private function detectMediaType(string $url): string
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        if (in_array($extension, ['mp4', 'mov', 'avi', 'webm'])) {
-            return 'video';
-        }
-
-        return 'image';
+        // Use shared MediaType helper for consistency across publishers.
+        // Instagram Content Publishing API only accepts:
+        //   - Images: jpg, jpeg, png
+        //   - Videos: mp4 (mov may work in some cases)
+        // Other formats will be rejected by the API with a clear error.
+        return \App\Services\MediaType::fromUrl($url);
     }
 }

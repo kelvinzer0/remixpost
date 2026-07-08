@@ -2,6 +2,7 @@
 
 namespace App\Services\Publishers;
 
+use App\Services\MediaType;
 use Exception;
 use GuzzleHttp\Client;
 
@@ -13,9 +14,11 @@ use GuzzleHttp\Client;
  * channel username (e.g. @mychannel) or chat ID (e.g. -1001234567890).
  *
  * API endpoints:
- *   - POST https://api.telegram.org/bot{TOKEN}/sendMessage (text)
- *   - POST https://api.telegram.org/bot{TOKEN}/sendPhoto (single image)
- *   - POST https://api.telegram.org/bot{TOKEN}/sendMediaGroup (multiple images)
+ *   - POST https://api.telegram.org/bot{TOKEN}/sendMessage      (text-only)
+ *   - POST https://api.telegram.org/bot{TOKEN}/sendPhoto         (single image)
+ *   - POST https://api.telegram.org/bot{TOKEN}/sendVideo         (single video)
+ *   - POST https://api.telegram.org/bot{TOKEN}/sendDocument      (single other file)
+ *   - POST https://api.telegram.org/bot{TOKEN}/sendMediaGroup    (multiple media, mixed types OK)
  *
  * Reference: https://core.telegram.org/bots/api
  *
@@ -28,7 +31,7 @@ class TelegramPublisher implements PublisherInterface
     public function __construct()
     {
         $this->httpClient = new Client([
-            'timeout' => 30,
+            'timeout' => 120, // longer for video upload
             'connect_timeout' => 10,
         ]);
     }
@@ -43,18 +46,19 @@ class TelegramPublisher implements PublisherInterface
 
             $apiBase = "https://api.telegram.org/bot{$botToken}";
 
-            // Single image with caption
+            // No media → text-only message
+            if (empty($mediaUrls)) {
+                return $this->sendMessage($apiBase, $chatId, $content);
+            }
+
+            // Single media → use the correct endpoint per type
             if (count($mediaUrls) === 1) {
-                return $this->sendPhoto($apiBase, $chatId, $content, $mediaUrls[0]);
+                return $this->sendSingleMedia($apiBase, $chatId, $content, $mediaUrls[0]);
             }
 
-            // Multiple images as media group
-            if (count($mediaUrls) > 1) {
-                return $this->sendMediaGroup($apiBase, $chatId, $content, $mediaUrls);
-            }
+            // Multiple media → sendMediaGroup (mixed types allowed)
+            return $this->sendMediaGroup($apiBase, $chatId, $content, $mediaUrls);
 
-            // Text only
-            return $this->sendMessage($apiBase, $chatId, $content);
         } catch (Exception $e) {
             return [
                 'success' => false,
@@ -76,31 +80,69 @@ class TelegramPublisher implements PublisherInterface
         return $this->parseResponse($response);
     }
 
-    private function sendPhoto(string $apiBase, string $chatId, string $caption, string $photoUrl): array
+    /**
+     * Send a single media item using the appropriate endpoint based on its type.
+     * Falls back to sendDocument for unknown types (e.g., PDF, ZIP).
+     */
+    private function sendSingleMedia(string $apiBase, string $chatId, string $caption, string $mediaUrl): array
     {
-        $response = $this->httpClient->post("{$apiBase}/sendPhoto", [
-            'form_params' => [
-                'chat_id' => $chatId,
-                'photo' => $photoUrl,
-                'caption' => $caption,
-                'parse_mode' => 'HTML',
-            ],
+        $type = MediaType::fromUrl($mediaUrl);
+
+        $params = [
+            'chat_id' => $chatId,
+            'caption' => $caption,
+            'parse_mode' => 'HTML',
+        ];
+
+        switch ($type) {
+            case 'image':
+                $params['photo'] = $mediaUrl;
+                $endpoint = '/sendPhoto';
+                break;
+            case 'video':
+                $params['video'] = $mediaUrl;
+                $params['supports_streaming'] = 'true';
+                $endpoint = '/sendVideo';
+                break;
+            default:
+                // Documents and unknown types → sendDocument
+                $params['document'] = $mediaUrl;
+                $endpoint = '/sendDocument';
+                break;
+        }
+
+        $response = $this->httpClient->post("{$apiBase}{$endpoint}", [
+            'form_params' => $params,
         ]);
 
         return $this->parseResponse($response);
     }
 
-    private function sendMediaGroup(string $apiBase, string $chatId, string $caption, array $photoUrls): array
+    /**
+     * Send multiple media items as a media group.
+     * Telegram allows mixed types in a media group (photos + videos).
+     * Documents can only be in a media group if all items are documents.
+     * Only the first item can have a caption.
+     */
+    private function sendMediaGroup(string $apiBase, string $chatId, string $caption, array $mediaUrls): array
     {
         $media = [];
-        foreach ($photoUrls as $i => $url) {
-            $media[] = [
-                'type' => 'photo',
+        foreach ($mediaUrls as $i => $url) {
+            $type = MediaType::fromUrl($url);
+            // Telegram media group only supports 'photo' and 'video' types.
+            // Documents get sent as 'photo' won't work — we fall back to 'document'
+            // but that means the group MUST be all documents or all photo/video mix.
+            $tgType = ($type === 'image') ? 'photo' : (($type === 'video') ? 'video' : 'document');
+
+            $item = [
+                'type' => $tgType,
                 'media' => $url,
-                // Only first item can have caption
-                'caption' => $i === 0 ? $caption : '',
-                'parse_mode' => 'HTML',
             ];
+            if ($i === 0) {
+                $item['caption'] = $caption;
+                $item['parse_mode'] = 'HTML';
+            }
+            $media[] = $item;
         }
 
         $response = $this->httpClient->post("{$apiBase}/sendMediaGroup", [
@@ -110,7 +152,50 @@ class TelegramPublisher implements PublisherInterface
             ],
         ]);
 
-        return $this->parseResponse($response);
+        $result = $this->parseResponse($response);
+
+        // If media group fails because of mixed document types, fall back to
+        // sending each item individually (with caption on first only).
+        if (!$result['success'] && !empty($mediaUrls)) {
+            return $this->sendIndividually($apiBase, $chatId, $caption, $mediaUrls);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fallback: send each media item as its own message.
+     * First item carries the caption; the rest go without.
+     */
+    private function sendIndividually(string $apiBase, string $chatId, string $caption, array $mediaUrls): array
+    {
+        $firstMessageId = null;
+        $lastError = null;
+
+        foreach ($mediaUrls as $i => $url) {
+            $itemCaption = ($i === 0) ? $caption : '';
+            $result = $this->sendSingleMedia($apiBase, $chatId, $itemCaption, $url);
+            if ($result['success']) {
+                if ($firstMessageId === null) {
+                    $firstMessageId = $result['external_id'] ?? null;
+                }
+            } else {
+                $lastError = $result['error'] ?? 'Unknown error';
+            }
+        }
+
+        if ($firstMessageId !== null) {
+            return [
+                'success' => true,
+                'external_id' => $firstMessageId,
+                'warning' => $lastError ? "Some media failed to send. Last error: {$lastError}" : null,
+            ];
+        }
+
+        return [
+            'success' => false,
+            'error' => $lastError ?? 'All media failed to send',
+        ];
     }
 
     private function parseResponse($response): array
@@ -128,6 +213,7 @@ class TelegramPublisher implements PublisherInterface
         if (isset($body['result']['message_id'])) {
             $messageId = (string) $body['result']['message_id'];
         } elseif (isset($body['result'][0]['message_id'])) {
+            // sendMediaGroup returns array of messages
             $messageId = (string) $body['result'][0]['message_id'];
         }
 
