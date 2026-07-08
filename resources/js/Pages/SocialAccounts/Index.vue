@@ -24,7 +24,7 @@ const telegramForm = useForm({
 });
 
 const connectTelegram = () => {
-    telegramForm.post('/social-accounts/connect-telegram', {
+    telegramForm.post('/integrations/social/connect-telegram', {
         onSuccess: () => telegramForm.reset(),
     });
 };
@@ -36,7 +36,7 @@ const emailForm = useForm({
 });
 
 const connectEmail = () => {
-    emailForm.post('/social-accounts/connect-email', {
+    emailForm.post('/integrations/social/connect-email', {
         onSuccess: () => emailForm.reset(),
     });
 };
@@ -157,17 +157,26 @@ const manualProviders = providers.filter(p => !p.oauth);
                             <p class="text-xs text-gray-500">Bot must be admin of the channel</p>
                         </div>
                     </div>
+                    <div class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                        <p class="font-medium mb-1">Setup steps:</p>
+                        <ol class="list-decimal ml-4 space-y-0.5">
+                            <li>Add the bot as <strong>administrator</strong> to your channel</li>
+                            <li>Give it <strong>Post Messages</strong> + <strong>Delete Messages</strong> permissions</li>
+                            <li>Enter the channel @username below</li>
+                            <li>You'll receive a verification code to confirm via private chat with the bot</li>
+                        </ol>
+                    </div>
                     <form @submit.prevent="connectTelegram" class="space-y-3">
                         <div>
-                            <label class="block text-xs font-medium text-gray-700">Channel username or chat ID</label>
+                            <label class="block text-xs font-medium text-gray-700">Channel username (public channels) or chat ID (private)</label>
                             <input v-model="telegramForm.channel_username" type="text" required
-                                placeholder="@mychannel or -1001234567890"
+                                placeholder="@warunglakku or -1001234567890"
                                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
                             <p v-if="telegramForm.errors.channel_username" class="mt-1 text-xs text-red-600">{{ telegramForm.errors.channel_username }}</p>
                         </div>
                         <button type="submit" :disabled="telegramForm.processing"
                             class="w-full py-2 text-xs font-medium text-center text-white bg-blue-500 rounded-md hover:bg-blue-600 disabled:opacity-50">
-                            Connect Telegram Channel
+                            {{ telegramForm.processing ? 'Verifying bot access...' : 'Start Verification' }}
                         </button>
                     </form>
                 </div>

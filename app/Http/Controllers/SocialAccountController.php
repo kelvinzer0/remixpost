@@ -508,7 +508,22 @@ class SocialAccountController extends Controller
     }
 
     /**
-     * Connect a Telegram channel manually (no OAuth — bot token from .env).
+     * Connect a Telegram channel — Step 1: Initiate verification.
+     *
+     * Flow:
+     *   1. Validate channel_username (e.g., @warunglakku or -1001234567890)
+     *   2. Call getChat → verifies bot can access the channel
+     *   3. Call getChatMember for the bot itself → verifies bot is ADMINISTRATOR
+     *   4. Generate 6-char verification code, store in session
+     *   5. Bot sends the code to the channel as a verification message
+     *   6. Wait briefly, then delete the message → proves bot has delete permission
+     *   7. Return response with the code + bot's @username + deep-link for user to send
+     *      the code back to the bot in a PRIVATE chat (proves user is a human admin)
+     *
+     * The user must then click the deep-link, which opens Telegram with the bot's
+     * private chat pre-filled with the code. User taps send → bot receives update
+     * → user calls /verify-telegram (step 2) → app captures user_id from update,
+     * verifies user_id is in channel's admin list → connection complete.
      */
     public function connectTelegram(Request $request)
     {
@@ -521,42 +536,263 @@ class SocialAccountController extends Controller
             return back()->with('error', 'TELEGRAM_TOKEN is not configured in .env');
         }
 
-        $channelUsername = $validated['channel_username'];
+        $channelInput = trim($validated['channel_username']);
 
-        // Verify bot can access the channel by sending a test API call
         try {
-            $response = \Illuminate\Support\Facades\Http::get(
-                "https://api.telegram.org/bot{$botToken}/getChat",
-                ['chat_id' => $channelUsername]
-            );
-
-            if (!$response->ok() || !($response['ok'] ?? false)) {
-                return back()->with('error', 'Bot cannot access this channel. Make sure the bot is added as admin. Error: ' . ($response['description'] ?? 'Unknown'));
+            // Step 1: getChat — verify bot can access the channel
+            $getChat = Http::get("https://api.telegram.org/bot{$botToken}/getChat", [
+                'chat_id' => $channelInput,
+            ]);
+            if (!$getChat->ok() || !($getChat['ok'] ?? false)) {
+                return back()->with('error', 'Bot cannot access this channel. Make sure the bot is added to the channel as an administrator. Telegram error: ' . ($getChat['description'] ?? 'Unknown'));
             }
 
-            $chatInfo = $response['result'];
+            $chatInfo = $getChat['result'];
+            $channelId = $chatInfo['id']; // numeric ID, more reliable than @username
+            $channelTitle = $chatInfo['title'] ?? $channelInput;
+            $channelType = $chatInfo['type'] ?? '';
 
-            SocialAccount::updateOrCreate(
-                [
-                    'provider' => 'telegram',
-                    'provider_id' => $channelUsername,
+            if (!in_array($channelType, ['channel', 'supergroup', 'group'])) {
+                return back()->with('error', "Expected a channel/group, got type '{$channelType}'. Only channels and groups are supported.");
+            }
+
+            // Step 2: getChatMember for the bot — verify bot is ADMINISTRATOR
+            $botMe = Http::get("https://api.telegram.org/bot{$botToken}/getMe");
+            if (!$botMe->ok() || !($botMe['ok'] ?? false)) {
+                return back()->with('error', 'Failed to identify bot: ' . ($botMe['description'] ?? 'Unknown'));
+            }
+            $botId = $botMe['result']['id'];
+            $botUsername = $botMe['result']['username'];
+
+            $getBotMember = Http::get("https://api.telegram.org/bot{$botToken}/getChatMember", [
+                'chat_id' => $channelId,
+                'user_id' => $botId,
+            ]);
+            if (!$getBotMember->ok() || !($getBotMember['ok'] ?? false)) {
+                return back()->with('error', 'Failed to verify bot membership: ' . ($getBotMember['description'] ?? 'Unknown'));
+            }
+            $botStatus = $getBotMember['result']['status'] ?? '';
+            if ($botStatus !== 'administrator') {
+                return back()->with('error', "Bot must be added as ADMINISTRATOR to the channel. Current bot status: '{$botStatus}'. Please promote the bot to admin in channel settings.");
+            }
+
+            // Step 3: Generate verification code, store in session
+            $code = strtoupper(\Illuminate\Support\Str::random(6));
+            session([
+                'telegram_verify' => [
+                    'channel_id' => $channelId,
+                    'channel_username' => $channelInput,
+                    'channel_title' => $channelTitle,
+                    'code' => $code,
+                    'bot_id' => $botId,
+                    'bot_username' => $botUsername,
+                    'expires_at' => now()->addMinutes(10)->timestamp,
                 ],
-                [
-                    'user_id' => $request->user()->id,
-                    'name' => $chatInfo['title'] ?? $channelUsername,
-                    'username' => $channelUsername,
-                    'avatar' => null,
-                    'access_token' => $botToken, // Bot token stored per-account (same for all)
-                    'refresh_token' => null,
-                    'is_active' => true,
-                ]
-            );
+            ]);
 
-            return redirect()->route('social-accounts.index')
-                ->with('message', "Telegram channel '{$channelUsername}' connected successfully.");
+            // Step 4: Bot sends the verification code to the channel as a proof-of-post message
+            $sendMsg = Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+                'chat_id' => $channelId,
+                'text' => "🔐 *Verification Code: `{$code}`*\n\nThis channel is being connected to Remixpost. The code will auto-delete shortly.\n\n_Channel: " . addslashes($channelTitle) . "_",
+                'parse_mode' => 'MarkdownV2',
+            ]);
+
+            $sentMessageId = null;
+            if ($sendMsg->ok() && ($sendMsg['ok'] ?? false)) {
+                $sentMessageId = $sendMsg['result']['message_id'] ?? null;
+            }
+
+            // Step 5: Delete the verification message after a brief delay
+            // (proves bot has delete permission — only admins can delete in channels)
+            if ($sentMessageId) {
+                sleep(2);
+                Http::post("https://api.telegram.org/bot{$botToken}/deleteMessage", [
+                    'chat_id' => $channelId,
+                    'message_id' => $sentMessageId,
+                ]);
+            }
+
+            // Step 6: Get bot's current updates offset (so we only look at messages from now on)
+            // This prevents replay attacks using old messages.
+            $updatesResp = Http::get("https://api.telegram.org/bot{$botToken}/getUpdates", [
+                'offset' => -1,
+                'limit' => 1,
+                'timeout' => 0,
+            ]);
+            $latestUpdateId = null;
+            if ($updatesResp->ok() && ($updatesResp['ok'] ?? false)) {
+                $updates = $updatesResp['result'] ?? [];
+                if (!empty($updates)) {
+                    $latestUpdateId = $updates[count($updates) - 1]['update_id'] ?? null;
+                }
+            }
+            session()->put('telegram_verify.updates_offset', $latestUpdateId ? $latestUpdateId + 1 : 0);
+
+            // Deep-link URL: opens bot's private chat with the code pre-filled
+            $botDeepLink = "https://t.me/{$botUsername}?start=" . $code;
+
+            return Inertia::render('SocialAccounts/VerifyTelegram', [
+                'channel_title' => $channelTitle,
+                'channel_username' => $channelInput,
+                'verification_code' => $code,
+                'bot_username' => $botUsername,
+                'bot_deep_link' => $botDeepLink,
+                'expires_at' => now()->addMinutes(10)->toIso8601String(),
+            ]);
 
         } catch (\Exception $e) {
-            return back()->with('error', 'Failed to connect Telegram: ' . $e->getMessage());
+            return back()->with('error', 'Failed to initiate Telegram verification: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Connect a Telegram channel — Step 2: Verify the user sent the code to the bot.
+     *
+     * Polls getUpdates for the bot, looking for a private message containing the code.
+     * When found, captures the sender's user_id and verifies it's an admin of the channel.
+     */
+    public function verifyTelegram(Request $request)
+    {
+        $session = session('telegram_verify');
+        if (!$session) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Verification session expired. Please start again.');
+        }
+
+        if (time() > $session['expires_at']) {
+            session()->forget('telegram_verify');
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Verification code expired (10-minute window). Please start again.');
+        }
+
+        $botToken = config('services.telegram.bot_token');
+        $code = $session['code'];
+        $channelId = $session['channel_id'];
+        $channelTitle = $session['channel_title'];
+        $channelUsername = $session['channel_username'];
+        $offset = $session['updates_offset'] ?? 0;
+
+        try {
+            // Poll getUpdates with the stored offset (long-poll 5s)
+            $updatesResp = Http::get("https://api.telegram.org/bot{$botToken}/getUpdates", [
+                'offset' => $offset,
+                'limit' => 50,
+                'timeout' => 5,
+            ]);
+
+            if (!$updatesResp->ok() || !($updatesResp['ok'] ?? false)) {
+                return back()->with('error', 'Failed to fetch bot updates: ' . ($updatesResp['description'] ?? 'Unknown'));
+            }
+
+            $updates = $updatesResp['result'] ?? [];
+            $newOffset = $offset;
+
+            foreach ($updates as $update) {
+                $newOffset = max($newOffset, ($update['update_id'] ?? 0) + 1);
+
+                $msg = $update['message'] ?? null;
+                if (!$msg) continue;
+
+                $chat = $msg['chat'] ?? [];
+                $chatType = $chat['type'] ?? '';
+                $text = trim($msg['text'] ?? '');
+                $sender = $msg['from'] ?? [];
+
+                // We only care about private chats (1:1 with bot)
+                if ($chatType !== 'private') continue;
+
+                // Strip /start prefix if user used deep-link (e.g., "/start WL7K2P9X")
+                $cleanText = $text;
+                if (str_starts_with($cleanText, '/start ')) {
+                    $cleanText = trim(substr($cleanText, 7));
+                } elseif (str_starts_with($cleanText, '/start')) {
+                    $cleanText = trim(substr($cleanText, 6));
+                }
+
+                // Compare case-insensitively
+                if (strcasecmp($cleanText, $code) !== 0) {
+                    continue;
+                }
+
+                // Code matches! Capture sender's user_id
+                $senderUserId = $sender['id'] ?? null;
+                $senderName = trim(($sender['first_name'] ?? '') . ' ' . ($sender['last_name'] ?? ''));
+                if (empty($senderName)) $senderName = $sender['username'] ?? 'Unknown';
+
+                if (!$senderUserId) continue;
+
+                // Verify the sender is an administrator of the channel
+                $adminsResp = Http::get("https://api.telegram.org/bot{$botToken}/getChatAdministrators", [
+                    'chat_id' => $channelId,
+                ]);
+
+                if (!$adminsResp->ok() || !($adminsResp['ok'] ?? false)) {
+                    session()->put('telegram_verify.updates_offset', $newOffset);
+                    return back()->with('error', 'Failed to fetch channel administrators: ' . ($adminsResp['description'] ?? 'Unknown'));
+                }
+
+                $admins = $adminsResp['result'] ?? [];
+                $isAdmin = false;
+                foreach ($admins as $admin) {
+                    if (($admin['user']['id'] ?? null) === $senderUserId) {
+                        $isAdmin = true;
+                        break;
+                    }
+                }
+
+                if (!$isAdmin) {
+                    session()->put('telegram_verify.updates_offset', $newOffset);
+                    session()->forget('telegram_verify');
+                    return redirect()->route('social-accounts.index')
+                        ->with('error', "Verification failed: '{$senderName}' is not an administrator of channel '{$channelTitle}'. Only channel admins can connect it.");
+                }
+
+                // Success! Save the SocialAccount
+                SocialAccount::updateOrCreate(
+                    [
+                        'provider' => 'telegram',
+                        'provider_id' => (string)$channelId,
+                    ],
+                    [
+                        'user_id' => $request->user()->id,
+                        'name' => $channelTitle,
+                        'username' => $channelUsername,
+                        'avatar' => null,
+                        'access_token' => $botToken,
+                        'refresh_token' => null,
+                        'is_active' => true,
+                    ]
+                );
+
+                session()->forget('telegram_verify');
+
+                return redirect()->route('social-accounts.index')
+                    ->with('message', "Telegram channel '{$channelTitle}' verified and connected successfully! Verified admin: {$senderName}.");
+
+                // Acknowledge the update so it doesn't come back next poll
+                Http::get("https://api.telegram.org/bot{$botToken}/getUpdates", [
+                    'offset' => $newOffset,
+                    'limit' => 1,
+                    'timeout' => 0,
+                ]);
+            }
+
+            // Code not found yet — update offset and ask user to try again
+            session()->put('telegram_verify.updates_offset', $newOffset);
+
+            return Inertia::render('SocialAccounts/VerifyTelegram', [
+                'channel_title' => $channelTitle,
+                'channel_username' => $channelUsername,
+                'verification_code' => $code,
+                'bot_username' => $session['bot_username'],
+                'bot_deep_link' => "https://t.me/{$session['bot_username']}?start=" . $code,
+                'expires_at' => now()->addSeconds($session['expires_at'] - time())->toIso8601String(),
+                'waiting' => true,
+                'message' => 'Code not received yet. Make sure you sent the code to @' . $session['bot_username'] . ' in a private chat (not in the channel). Click Verify again after sending.',
+            ]);
+
+        } catch (\Exception $e) {
+            return back()->with('error', 'Verification failed: ' . $e->getMessage());
         }
     }
 
