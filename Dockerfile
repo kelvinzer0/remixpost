@@ -71,6 +71,8 @@ RUN mkdir -p /app/storage/app/public \
         /app/storage/framework/views \
         /app/storage/logs \
         /app/bootstrap/cache \
+        /var/log/supervisor \
+        /run \
     && chown -R www-data:www-data /app/storage /app/bootstrap/cache \
     || chown -R nobody:nobody /app/storage /app/bootstrap/cache
 
