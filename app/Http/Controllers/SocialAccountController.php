@@ -37,9 +37,17 @@ class SocialAccountController extends Controller
         // Store intended user_id in session (for callback)
         session(['oauth_user_id' => $request->user()->id]);
 
-        return Socialite::driver($provider)->scopes(
-            config("services.{$provider}.scopes", [])
-        )->redirect();
+        $driver = Socialite::driver($provider);
+        $scopes = config("services.{$provider}.scopes", []);
+
+        // LinkedIn: Socialite adds deprecated r_liteprofile + r_emailaddress by default.
+        // Use setScopes() to completely replace default scopes with our custom set.
+        if ($provider === 'linkedin') {
+            $driver->setScopes($scopes);
+            return $driver->redirect();
+        }
+
+        return $driver->scopes($scopes)->redirect();
     }
 
     /**
