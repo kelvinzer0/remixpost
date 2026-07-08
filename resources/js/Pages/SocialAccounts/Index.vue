@@ -90,6 +90,11 @@ const manualProviders = providers.filter(p => !p.oauth);
                                 class="ml-3 px-2 py-0.5 text-xs font-medium text-blue-700 bg-blue-100 rounded-full">
                                 Video
                             </span>
+                            <!-- Reconnect required badge for YouTube without refresh_token -->
+                            <span v-if="account.provider === 'youtube' && !account.has_refresh_token"
+                                class="ml-3 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-100 rounded-full border border-orange-200">
+                                ⚠ Reconnect required
+                            </span>
                             <span v-if="account.is_active"
                                 class="ml-3 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full">
                                 Active

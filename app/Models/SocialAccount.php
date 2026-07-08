@@ -55,4 +55,20 @@ class SocialAccount extends Model
     {
         return data_get($this->metadata, $key, $default);
     }
+
+    /**
+     * Accessor: has_refresh_token
+     * Exposed as has_refresh_token in JSON serialization even though
+     * refresh_token itself is hidden. Used by UI to show 'Reconnect required'
+     * badge for YouTube accounts that lack a refresh_token.
+     */
+    public function getHasRefreshTokenAttribute(): bool
+    {
+        return !empty($this->refresh_token);
+    }
+
+    /**
+     * Append computed attributes to array serialization.
+     */
+    protected $appends = ['has_refresh_token'];
 }

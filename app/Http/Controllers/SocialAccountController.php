@@ -17,7 +17,7 @@ class SocialAccountController extends Controller
         $accounts = $request->user()
             ->socialAccounts()
             ->orderBy('created_at', 'desc')
-            ->get(['id', 'provider', 'name', 'username', 'avatar', 'is_active', 'metadata', 'created_at']);
+            ->get(['id', 'provider', 'name', 'username', 'avatar', 'is_active', 'metadata', 'refresh_token', 'created_at']);
 
         return Inertia::render('SocialAccounts/Index', [
             'accounts' => $accounts,
@@ -53,6 +53,23 @@ class SocialAccountController extends Controller
         if ($provider === 'pinterest') {
             $driver->setScopes($scopes);
             return $driver->redirect();
+        }
+
+        // YouTube (Google): Google only returns a refresh_token on the FIRST
+        // authorization. If the user has previously authorized this app with
+        // the same scopes, Google silently drops the refresh_token from the
+        // response — leaving us unable to refresh the access token when it
+        // expires (which happens every hour).
+        // Fix: force prompt=consent + access_type=offline on every authorization
+        // URL so Google always issues a fresh refresh_token.
+        if ($provider === 'youtube') {
+            $driver->setScopes($scopes);
+            // SocialiteProviders YouTube provider sets access_type=offline by default,
+            // but we still need to force prompt=consent via the with() method.
+            return $driver->with([
+                'access_type' => 'offline',
+                'prompt' => 'consent',
+            ])->redirect();
         }
 
         // Twitter uses OAuth1 (Socialite\One) which doesn't have scopes().
@@ -386,12 +403,21 @@ class SocialAccountController extends Controller
         }
 
         // Step 2: If Socialite worked, get access token
+        $accessToken = null;
+        $refreshToken = null;
+        $expiresIn = null;
+
         if ($socialiteUser) {
             $accessToken = $socialiteUser->token;
             $refreshToken = $socialiteUser->refreshToken ?? null;
             $expiresIn = $socialiteUser->expiresIn ?? null;
-        } else {
-            // Step 3: Fallback — manual token exchange
+        }
+
+        // Step 3: Always do a fresh manual token exchange to ensure we get
+        // refresh_token. Google's Socialite driver sometimes drops the refresh
+        // token if it thinks the user has already authorized the app. Manual
+        // exchange is more reliable because we can verify the response directly.
+        if (!$accessToken || !$refreshToken) {
             $tokenResponse = Http::post('https://oauth2.googleapis.com/token', [
                 'code' => $request->get('code'),
                 'client_id' => config('services.youtube.client_id'),
@@ -400,13 +426,29 @@ class SocialAccountController extends Controller
                 'grant_type' => 'authorization_code',
             ])->json();
 
-            $accessToken = $tokenResponse['access_token'] ?? null;
-            $refreshToken = $tokenResponse['refresh_token'] ?? null;
-            $expiresIn = $tokenResponse['expires_in'] ?? null;
-
             if (!$accessToken) {
-                throw new \Exception('Failed to get Google access token');
+                $accessToken = $tokenResponse['access_token'] ?? null;
             }
+            if (!$refreshToken) {
+                $refreshToken = $tokenResponse['refresh_token'] ?? null;
+            }
+            if (!$expiresIn) {
+                $expiresIn = $tokenResponse['expires_in'] ?? null;
+            }
+
+            if (empty($tokenResponse['refresh_token'])) {
+                // Google did NOT return a refresh_token even with prompt=consent.
+                // This is rare but happens if the user previously revoked only
+                // some scopes. Log it so we can diagnose.
+                Log::warning('YouTube token exchange did not return refresh_token', [
+                    'has_access_token' => !empty($accessToken),
+                    'response_keys' => array_keys($tokenResponse),
+                ]);
+            }
+        }
+
+        if (!$accessToken) {
+            throw new \Exception('Failed to get Google access token');
         }
 
         // Step 4: Fetch ALL channels (personal + brand/managed)
