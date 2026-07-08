@@ -43,10 +43,18 @@ class PinterestPublisher implements PublisherInterface
     {
         try {
             $accessToken = $account['access_token'];
-            $boardId = $account['provider_id']; // Pinterest board ID
+            $boardId = $account['provider_id']; // Pinterest board ID (numeric string)
             $title = mb_substr($post['content'], 0, 100);
             $description = mb_substr($post['content'], 0, 800);
             $mediaUrls = $post['media_urls'] ?? [];
+
+            // Validate board_id — must be numeric string (Pinterest board IDs are numeric)
+            if (empty($boardId) || !preg_match('/^\d+$/', $boardId)) {
+                return [
+                    'success' => false,
+                    'error' => "Pinterest board_id is invalid (got: '{$boardId}'). Disconnect the account and re-connect it — older connections stored username instead of board ID.",
+                ];
+            }
 
             // Pinterest requires at least one media item (image OR video)
             if (empty($mediaUrls)) {
@@ -58,7 +66,7 @@ class PinterestPublisher implements PublisherInterface
 
             // Pick first media URL — Pinterest supports single media per pin (standard pin)
             $mediaUrl = $mediaUrls[0];
-            $isVideo = $this->isVideoUrl($mediaUrl);
+            $isVideo = \App\Services\MediaType::fromUrl($mediaUrl) === 'video';
 
             $pinData = [
                 'board_id' => $boardId,
@@ -70,7 +78,7 @@ class PinterestPublisher implements PublisherInterface
                 // Video pin: register media upload → upload → poll for processing → publish
                 $mediaId = $this->uploadVideo($mediaUrl, $accessToken);
                 if (!$mediaId) {
-                    return ['success' => false, 'error' => 'Pinterest video upload failed.'];
+                    return ['success' => false, 'error' => 'Pinterest video upload failed. Make sure your Pinterest account has the media:write scope (re-connect to refresh scopes if needed).'];
                 }
                 $pinData['media_source'] = [
                     'source_type' => 'video_id',
@@ -95,12 +103,22 @@ class PinterestPublisher implements PublisherInterface
             $body = json_decode($response->getBody()->getContents(), true);
 
             if (!isset($body['id'])) {
-                return ['success' => false, 'error' => 'Pinterest did not return pin ID', 'response' => $body];
+                $err = $body['message'] ?? $body['error'] ?? 'Pinterest did not return pin ID';
+                return ['success' => false, 'error' => $err, 'response' => $body];
             }
 
             return [
                 'success' => true,
                 'external_id' => $body['id'],
+            ];
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            // 4xx errors include API error details
+            $resp = $e->getResponse();
+            $body = $resp ? json_decode($resp->getBody()->getContents(), true) : null;
+            return [
+                'success' => false,
+                'error' => $body['message'] ?? $body['error'] ?? $e->getMessage(),
+                'status' => $resp ? $resp->getStatusCode() : null,
             ];
         } catch (Exception $e) {
             return [

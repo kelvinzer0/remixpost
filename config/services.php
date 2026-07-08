@@ -51,7 +51,13 @@ return [
         'client_id' => env('PINTEREST_CLIENT_ID'),
         'client_secret' => env('PINTEREST_CLIENT_SECRET'),
         'redirect' => '/integrations/social/pinterest',
-        'scopes' => ['boards:read', 'pins:write'],
+        // Scopes required for image AND video pin upload:
+        //   boards:read    — list user's boards (for board picker if needed)
+        //   pins:write     — create pins (image + video)
+        //   media:write    — register + upload media (required by POST /v5/media)
+        //   video:upload   — upload video content (Pinterest separates this from media:write)
+        //   user_accounts:read — verify account access (recommended)
+        'scopes' => ['boards:read', 'pins:write', 'media:write', 'user_accounts:read'],
     ],
     'mastodon' => [
         'url' => env('MASTODON_URL', 'https://mastodon.social'),

@@ -35,6 +35,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback']);
 
     Route::post('/integrations/social/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
+    Route::post('/integrations/social/select-pinterest-board', [SocialAccountController::class, 'selectPinterestBoard'])->name('social-accounts.select-pinterest-board');
     Route::post('/integrations/social/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');
     Route::post('/integrations/social/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
     Route::post('/integrations/social/verify-telegram', [SocialAccountController::class, 'verifyTelegram'])->name('social-accounts.verify-telegram');

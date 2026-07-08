@@ -149,7 +149,34 @@ class SocialAccountController extends Controller
                 ]);
             }
 
-            // Store directly for Twitter, Pinterest, TikTok, Mastodon
+            // Pinterest: must select a board to post pins to.
+            // Pins in Pinterest API v5 require board_id — we cannot create a pin without one.
+            if ($provider === 'pinterest') {
+                $boards = $this->getPinterestBoards($socialiteUser->token);
+
+                if (empty($boards)) {
+                    return redirect()->route('social-accounts.index')
+                        ->with('error', 'No Pinterest boards found. Create at least one board on Pinterest first, then try connecting again.');
+                }
+
+                session([
+                    'pin_access_token' => $socialiteUser->token,
+                    'pin_refresh_token' => $socialiteUser->refreshToken
+                        ?? (method_exists($socialiteUser, 'getRefreshToken') ? $socialiteUser->getRefreshToken() : null)
+                        ?? (property_exists($socialiteUser, 'refreshToken') ? $socialiteUser->refreshToken : null),
+                    'pin_expires_in' => $socialiteUser->expiresIn,
+                    'pin_user_name' => $socialiteUser->getName() ?? $socialiteUser->getNickname() ?? 'Pinterest User',
+                    'pin_user_id' => $socialiteUser->getId(),
+                    'pin_user_avatar' => $socialiteUser->getAvatar(),
+                    'pin_boards' => $boards,
+                ]);
+
+                return Inertia::render('SocialAccounts/SelectPinterestBoard', [
+                    'boards' => $boards,
+                ]);
+            }
+
+            // Store directly for Twitter, TikTok, Mastodon
             $this->createSocialAccount($userId, $provider, $socialiteUser);
 
             return redirect()->route('social-accounts.index')
@@ -982,5 +1009,87 @@ class SocialAccountController extends Controller
         }
 
         return $response->json('data', []);
+    }
+
+    /**
+     * Fetch Pinterest boards the user owns.
+     * API: GET https://api.pinterest.com/v5/boards
+     * Requires scope: boards:read
+     */
+    private function getPinterestBoards(string $accessToken): array
+    {
+        $response = Http::withToken($accessToken)
+            ->get('https://api.pinterest.com/v5/boards', [
+                'page_size' => 100,
+            ]);
+
+        if (!$response->ok()) {
+            Log::error('Failed to fetch Pinterest boards', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+            return [];
+        }
+
+        $boards = $response->json('items', []);
+        // Normalize: only return id, name, description, privacy
+        return array_map(function ($b) {
+            return [
+                'id' => $b['id'] ?? null,
+                'name' => $b['name'] ?? 'Untitled board',
+                'description' => $b['description'] ?? '',
+                'privacy' => $b['privacy'] ?? 'PUBLIC',
+            ];
+        }, $boards);
+    }
+
+    /**
+     * Handle Pinterest board selection after OAuth.
+     * Stores the board_id as provider_id (PinterestPublisher needs board_id to create pins).
+     */
+    public function selectPinterestBoard(Request $request)
+    {
+        $validated = $request->validate([
+            'board_id' => 'required|string',
+        ]);
+
+        $boards = session('pin_boards', []);
+        $selected = collect($boards)->firstWhere('id', $validated['board_id']);
+
+        if (!$selected) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid board selection.');
+        }
+
+        $userId = session('oauth_user_id', Auth::id());
+        $accessToken = session('pin_access_token');
+        $refreshToken = session('pin_refresh_token');
+        $expiresIn = session('pin_expires_in');
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'pinterest',
+                'provider_id' => $selected['id'], // board_id — required by /v5/pins
+            ],
+            [
+                'user_id' => $userId,
+                'name' => session('pin_user_name') . ' → ' . $selected['name'],
+                'username' => $selected['name'],
+                'avatar' => session('pin_user_avatar'),
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'expires_at' => $expiresIn ? now()->addSeconds($expiresIn) : null,
+                'is_active' => true,
+            ]
+        );
+
+        session()->forget([
+            'pin_access_token', 'pin_refresh_token', 'pin_expires_in',
+            'pin_user_name', 'pin_user_id', 'pin_user_avatar',
+            'pin_boards', 'oauth_user_id',
+        ]);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Pinterest board '{$selected['name']}' connected successfully.");
     }
 }

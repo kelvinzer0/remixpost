@@ -2,6 +2,7 @@
 
 namespace App\Services\Publishers;
 
+use App\Services\MediaType;
 use Exception;
 use GuzzleHttp\Client;
 
@@ -14,13 +15,17 @@ use GuzzleHttp\Client;
  * API endpoints used:
  *   - POST https://api.linkedin.com/v2/ugcPosts (create post)
  *   - POST https://api.linkedin.com/v2/assets?action=registerUpload (register media upload)
+ *   - GET  https://api.linkedin.com/v2/assets/{asset-id} (poll asset status for videos)
  *
  * Supported media:
  *   - Images: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-image
  *   - Videos: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-video
+ *     Then poll asset status until AVAILABLE before posting ugcPosts
  *   - shareMediaCategory: IMAGE for image-only, VIDEO for video-only, NONE for text-only
  *
- * Reference: https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/ugc-post-api
+ * Reference:
+ *   https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/ugc-post-api
+ *   https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/video-upload-api
  *
  * @license Apache-2.0 (implemented from official API docs, not derived from third-party code)
  */
@@ -31,7 +36,7 @@ class LinkedInPublisher implements PublisherInterface
     public function __construct()
     {
         $this->httpClient = new Client([
-            'timeout' => 120,
+            'timeout' => 300, // 5 min for large video uploads + status polling
             'connect_timeout' => 10,
         ]);
     }
@@ -69,7 +74,7 @@ class LinkedInPublisher implements PublisherInterface
             $imageUrls = [];
             $videoUrls = [];
             foreach ($mediaUrls as $url) {
-                if ($this->isVideoUrl($url)) {
+                if (MediaType::fromUrl($url) === 'video') {
                     $videoUrls[] = $url;
                 } else {
                     $imageUrls[] = $url;
@@ -80,14 +85,20 @@ class LinkedInPublisher implements PublisherInterface
             if (!empty($imageUrls)) {
                 $media = [];
                 foreach ($imageUrls as $url) {
-                    $assetUrn = $this->uploadMedia($url, $accessToken, $authorUrn, 'image');
-                    if ($assetUrn) {
+                    $result = $this->uploadMedia($url, $accessToken, $authorUrn, 'image');
+                    if ($result['success']) {
                         $media[] = [
                             'status' => 'READY',
                             'description' => ['text' => ''],
-                            'media' => $assetUrn,
+                            'media' => $result['assetUrn'],
                             'mediaType' => 'IMAGE',
                         ];
+                    } else {
+                        // Log warning, continue with remaining images
+                        \Illuminate\Support\Facades\Log::warning('LinkedIn image upload failed', [
+                            'url' => $url,
+                            'error' => $result['error'],
+                        ]);
                     }
                 }
                 if (!empty($media)) {
@@ -95,18 +106,33 @@ class LinkedInPublisher implements PublisherInterface
                     $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = $media;
                 }
             } elseif (!empty($videoUrls)) {
-                // Video post — single video only
+                // Video post — single video only (LinkedIn limitation)
                 $url = $videoUrls[0];
-                $assetUrn = $this->uploadMedia($url, $accessToken, $authorUrn, 'video');
-                if ($assetUrn) {
-                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'VIDEO';
-                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
-                        'status' => 'READY',
-                        'description' => ['text' => mb_substr($content, 0, 300)],
-                        'media' => $assetUrn,
-                        'mediaType' => 'VIDEO',
-                    ]];
+                $result = $this->uploadMedia($url, $accessToken, $authorUrn, 'video');
+                if (!$result['success']) {
+                    return [
+                        'success' => false,
+                        'error' => 'LinkedIn video upload failed: ' . $result['error'],
+                    ];
                 }
+
+                // For video, MUST wait until asset status is AVAILABLE before ugcPost
+                $assetUrn = $result['assetUrn'];
+                $assetStatus = $this->waitForAssetReady($assetUrn, $accessToken);
+                if (!$assetStatus['ready']) {
+                    return [
+                        'success' => false,
+                        'error' => 'LinkedIn video processing failed or timed out: ' . ($assetStatus['error'] ?? 'Unknown'),
+                    ];
+                }
+
+                $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'VIDEO';
+                $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
+                    'status' => 'READY',
+                    'description' => ['text' => mb_substr($content, 0, 300)],
+                    'media' => $assetUrn,
+                    'mediaType' => 'VIDEO',
+                ]];
             }
 
             $response = $this->httpClient->post('https://api.linkedin.com/v2/ugcPosts', [
@@ -142,8 +168,9 @@ class LinkedInPublisher implements PublisherInterface
     /**
      * Upload media to LinkedIn using registerUpload flow.
      * Uses feedshare-image recipe for images, feedshare-video recipe for videos.
+     * Returns ['success' => bool, 'assetUrn' => string|null, 'error' => string|null].
      */
-    private function uploadMedia(string $url, string $accessToken, string $authorUrn, string $type = 'image'): ?string
+    private function uploadMedia(string $url, string $accessToken, string $authorUrn, string $type = 'image'): array
     {
         try {
             $recipe = $type === 'video'
@@ -179,7 +206,7 @@ class LinkedInPublisher implements PublisherInterface
                 ['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl'] ?? null;
 
             if (!$assetUrn || !$uploadUrl) {
-                return null;
+                return ['success' => false, 'assetUrn' => null, 'error' => 'registerUpload did not return asset or upload URL'];
             }
 
             // Step 2: Download media and upload to LinkedIn's upload URL
@@ -189,23 +216,83 @@ class LinkedInPublisher implements PublisherInterface
                 $type === 'video' ? 'video/mp4' : 'application/octet-stream'
             );
 
+            // LinkedIn's upload URL expects binary data PUT.
+            // IMPORTANT: do NOT send Authorization header to the upload URL — it uses presigned URL auth
             $this->httpClient->put($uploadUrl, [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $accessToken,
                     'Content-Type' => $mediaMime,
+                    'Content-Length' => strlen($mediaData),
                 ],
                 'body' => $mediaData,
             ]);
 
-            return $assetUrn;
+            return ['success' => true, 'assetUrn' => $assetUrn, 'error' => null];
         } catch (Exception $e) {
-            return null;
+            return ['success' => false, 'assetUrn' => null, 'error' => $e->getMessage()];
         }
     }
 
-    private function isVideoUrl(string $url): bool
+    /**
+     * Poll LinkedIn asset status until AVAILABLE (for videos).
+     * For images, asset is immediately available so this returns quickly.
+     *
+     * Returns ['ready' => bool, 'error' => string|null].
+     */
+    private function waitForAssetReady(string $assetUrn, string $accessToken): array
     {
-        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
-        return in_array($ext, ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v']);
+        // Extract asset ID from URN (e.g., urn:li:digitalmediaAsset:C5F10AAE8I89000...)
+        $assetId = strrpos($assetUrn, ':') !== false
+            ? substr($assetUrn, strrpos($assetUrn, ':') + 1)
+            : $assetUrn;
+
+        $maxAttempts = 60; // 60 attempts × 5s = 5 minutes max
+        $attempt = 0;
+
+        while ($attempt < $maxAttempts) {
+            $attempt++;
+            try {
+                $response = $this->httpClient->get(
+                    "https://api.linkedin.com/v2/assets/{$assetId}",
+                    [
+                        'headers' => [
+                            'Authorization' => 'Bearer ' . $accessToken,
+                            'X-Restli-Protocol-Version' => '2.0.0',
+                        ],
+                    ]
+                );
+
+                $body = json_decode($response->getBody()->getContents(), true);
+                $status = $this->getAssetStatus($body);
+
+                if ($status === 'AVAILABLE') {
+                    return ['ready' => true, 'error' => null];
+                }
+                if (in_array($status, ['FAILED', 'CANCELLED'])) {
+                    return ['ready' => false, 'error' => "Asset status: {$status}"];
+                }
+
+                // Still processing — wait and retry
+                sleep(5);
+            } catch (Exception $e) {
+                // Transient error — wait and retry
+                sleep(5);
+            }
+        }
+
+        return ['ready' => false, 'error' => 'Timeout waiting for asset to become AVAILABLE'];
+    }
+
+    /**
+     * Extract asset status from LinkedIn API response.
+     * Status field can be in different locations depending on recipe.
+     */
+    private function getAssetStatus(array $body): ?string
+    {
+        // For videos: recipes[0].status
+        if (isset($body['recipes'][0]['status'])) {
+            return $body['recipes'][0]['status'];
+        }
+        // Fallback: top-level status field
+        return $body['status'] ?? null;
     }
 }
