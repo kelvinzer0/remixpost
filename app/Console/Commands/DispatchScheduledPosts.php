@@ -13,8 +13,10 @@ class DispatchScheduledPosts extends Command
 
     public function handle(): int
     {
+        $now = \Carbon\Carbon::now(config('app.timezone'));
+
         $duePosts = Post::where('status', Post::STATUS_SCHEDULED)
-            ->where('scheduled_at', '<=', now())
+            ->where('scheduled_at', '<=', $now)
             ->with('socialAccounts')
             ->get();
 
