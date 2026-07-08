@@ -2,7 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
-defineProps({
+const props = defineProps({
     posts: Array,
     currentMonth: String,
 });
@@ -15,8 +15,8 @@ const statusColors = {
 };
 
 // Build calendar grid for current month
-const buildCalendar = () => {
-    const [year, month] = currentMonth.split('-').map(Number);
+const buildCalendar = (monthStr) => {
+    const [year, month] = (monthStr || new Date().toISOString().slice(0, 7)).split('-').map(Number);
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
     const startDate = new Date(firstDay);
@@ -24,18 +24,17 @@ const buildCalendar = () => {
 
     const days = [];
     const current = new Date(startDate);
-    while (current <= lastDay || current.getDay() !== 0 || days.length % 7 !== 0) {
+    while (days.length < 42) {
         days.push(new Date(current));
         current.setDate(current.getDate() + 1);
-        if (days.length >= 42) break;
     }
     return { days, year, month: month - 1 };
 };
 
-const { days, year, month } = buildCalendar();
+const { days, year, month } = buildCalendar(props.currentMonth);
 
 const getPostsForDay = (date) => {
-    return posts.filter(post => {
+    return (props.posts || []).filter(post => {
         const postDate = new Date(post.scheduled_at || post.published_at);
         return postDate.getDate() === date.getDate() &&
                postDate.getMonth() === date.getMonth() &&
