@@ -20,6 +20,7 @@ class SocialAccount extends Model
         'refresh_token',
         'expires_at',
         'is_active',
+        'metadata',
     ];
 
     protected $hidden = [
@@ -32,6 +33,7 @@ class SocialAccount extends Model
         return [
             'expires_at' => 'datetime',
             'is_active' => 'boolean',
+            'metadata' => 'array',
         ];
     }
 
@@ -43,5 +45,14 @@ class SocialAccount extends Model
     public function posts()
     {
         return $this->belongsToMany(Post::class, 'post_social_account');
+    }
+
+    /**
+     * Get a single key from metadata with default fallback.
+     * Used by publishers to read provider-specific config.
+     */
+    public function getMeta(string $key, $default = null)
+    {
+        return data_get($this->metadata, $key, $default);
     }
 }

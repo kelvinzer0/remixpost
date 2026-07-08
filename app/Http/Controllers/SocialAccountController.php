@@ -17,7 +17,7 @@ class SocialAccountController extends Controller
         $accounts = $request->user()
             ->socialAccounts()
             ->orderBy('created_at', 'desc')
-            ->get(['id', 'provider', 'name', 'username', 'avatar', 'is_active', 'created_at']);
+            ->get(['id', 'provider', 'name', 'username', 'avatar', 'is_active', 'metadata', 'created_at']);
 
         return Inertia::render('SocialAccounts/Index', [
             'accounts' => $accounts,
@@ -500,11 +500,15 @@ class SocialAccountController extends Controller
 
     /**
      * Store selected YouTube channel as social account.
+     * User also chooses upload_mode: 'video' (regular) or 'short' (YouTube Shorts).
+     * Stored in metadata column so the publisher knows whether to auto-add
+     * #shorts hashtag and adjust category.
      */
     public function selectYoutubeChannel(Request $request)
     {
         $validated = $request->validate([
             'channel_id' => 'required|string',
+            'upload_mode' => ['required', 'string', 'in:video,short'],
         ]);
 
         $channels = session('yt_channels', []);
@@ -515,16 +519,25 @@ class SocialAccountController extends Controller
                 ->with('error', 'Invalid channel selection.');
         }
 
+        $uploadMode = $validated['upload_mode'];
         $userId = session('oauth_user_id', Auth::id());
+
+        // Use provider_id with mode suffix so user can connect the same channel
+        // in both video + short mode if they want (e.g. "UCxxx:video" and "UCxxx:short").
+        // The unique constraint on (provider, provider_id) prevents duplicate connections
+        // of the same mode, but allows one of each mode.
+        $providerId = $selected['id'] . ':' . $uploadMode;
+
+        $displayName = $selected['title'] . ' (' . ($uploadMode === 'short' ? 'Shorts' : 'Video') . ')';
 
         SocialAccount::updateOrCreate(
             [
                 'provider' => 'youtube',
-                'provider_id' => $selected['id'],
+                'provider_id' => $providerId,
             ],
             [
                 'user_id' => $userId,
-                'name' => $selected['title'],
+                'name' => $displayName,
                 'username' => $selected['title'],
                 'avatar' => $selected['thumbnail'],
                 'access_token' => session('yt_access_token'),
@@ -533,13 +546,20 @@ class SocialAccountController extends Controller
                     ? now()->addSeconds(session('yt_expires_in'))
                     : null,
                 'is_active' => true,
+                'metadata' => [
+                    'upload_mode' => $uploadMode,
+                    'channel_id' => $selected['id'],
+                    'channel_title' => $selected['title'],
+                    'channel_type' => $selected['type'] ?? 'personal',
+                ],
             ]
         );
 
         session()->forget(['yt_access_token', 'yt_refresh_token', 'yt_expires_in', 'yt_channels', 'oauth_user_id']);
 
+        $modeLabel = $uploadMode === 'short' ? 'Shorts' : 'Video';
         return redirect()->route('social-accounts.index')
-            ->with('message', "YouTube channel '{$selected['title']}' connected successfully.");
+            ->with('message', "YouTube channel '{$selected['title']}' connected as {$modeLabel} channel successfully.");
     }
 
     /**

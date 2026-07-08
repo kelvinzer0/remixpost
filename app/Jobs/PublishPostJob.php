@@ -52,9 +52,12 @@ class PublishPostJob implements ShouldQueue
                 'content' => $post->content,
                 'media_urls' => $post->media_urls ?? [],
             ], [
+                'id' => $account->id,
                 'access_token' => $account->access_token,
                 'refresh_token' => $account->refresh_token,
                 'provider_id' => $account->provider_id,
+                'expires_at' => $account->expires_at,
+                'metadata' => $account->metadata,
             ]);
 
             // Update pivot table with result

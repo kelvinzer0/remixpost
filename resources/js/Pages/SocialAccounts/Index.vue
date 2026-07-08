@@ -81,6 +81,15 @@ const manualProviders = providers.filter(p => !p.oauth);
                                 <p class="text-sm font-medium text-gray-900">{{ account.name || account.username }}</p>
                                 <p class="text-xs text-gray-500 capitalize">{{ account.provider }}</p>
                             </div>
+                            <!-- Upload mode badge for YouTube -->
+                            <span v-if="account.provider === 'youtube' && account.metadata?.upload_mode === 'short'"
+                                class="ml-3 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-100 rounded-full">
+                                Shorts
+                            </span>
+                            <span v-else-if="account.provider === 'youtube' && account.metadata?.upload_mode === 'video'"
+                                class="ml-3 px-2 py-0.5 text-xs font-medium text-blue-700 bg-blue-100 rounded-full">
+                                Video
+                            </span>
                             <span v-if="account.is_active"
                                 class="ml-3 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full">
                                 Active
