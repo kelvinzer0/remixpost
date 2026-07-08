@@ -108,7 +108,7 @@ class SocialAccountController extends Controller
                     ->with('message', ucfirst($provider) . ' account connected successfully.');
             }
 
-            // YouTube: manual flow with channel picker
+            // YouTube: manual flow with channel + upload_mode picker
             if ($provider === 'youtube') {
                 $youtubeResult = $this->handleYouTubeCallback($request);
 
@@ -125,10 +125,18 @@ class SocialAccountController extends Controller
                     ]);
                 }
 
-                $socialiteUser = $youtubeResult['user'];
-                $this->createSocialAccount($userId, $provider, $socialiteUser);
+                if ($youtubeResult['type'] === 'error') {
+                    return redirect()->route('social-accounts.index')
+                        ->with('error', $youtubeResult['message']);
+                }
+
+                // Legacy fallback (should not happen anymore since we always select_channel)
+                $socialiteUser = $youtubeResult['user'] ?? null;
+                if ($socialiteUser) {
+                    $this->createSocialAccount($userId, $provider, $socialiteUser);
+                }
                 return redirect()->route('social-accounts.index')
-                    ->with('message', ucfirst($provider) . ' account connected successfully.');
+                    ->with('error', 'YouTube connection failed: unexpected state. Please try again.');
             }
 
             // Facebook, Twitter, Pinterest, TikTok, Mastodon: use Socialite
@@ -451,8 +459,10 @@ class SocialAccountController extends Controller
 
         Log::info("YouTube: found " . count($channels) . " channel(s)");
 
-        // Step 5: If multiple channels → return for selection
-        if (count($channels) > 1) {
+        // Step 5: ALWAYS return for channel+mode selection, even if only 1 channel found.
+        // The user must pick the upload mode (Video / Shorts) before we can store
+        // the account — that's the whole point of the new picker.
+        if (count($channels) >= 1) {
             return [
                 'type' => 'select_channel',
                 'access_token' => $accessToken,
@@ -462,40 +472,12 @@ class SocialAccountController extends Controller
             ];
         }
 
-        // Step 6: Single channel or no channel — create user object
-        if (count($channels) === 1) {
-            $ch = $channels[0];
-            $user = new \Laravel\Socialite\Two\User();
-            $user->id = $ch['id'];
-            $user->name = $ch['title'];
-            $user->avatar = $ch['thumbnail'];
-            $user->token = $accessToken;
-            $user->refreshToken = $refreshToken;
-            $user->expiresIn = $expiresIn;
-            return ['type' => 'user', 'user' => $user];
-        }
-
-        // Step 7: No channels at all — fallback to Google userinfo
-        $googleUser = Http::withToken($accessToken)
-            ->get('https://www.googleapis.com/oauth2/v2/userinfo')
-            ->json();
-
-        if (!isset($googleUser['id'])) {
-            throw new \Exception('Could not get YouTube channel or Google user info');
-        }
-
-        $user = new \Laravel\Socialite\Two\User();
-        $user->id = $googleUser['id'];
-        $user->name = $googleUser['name'] ?? $googleUser['email'] ?? 'YouTube User';
-        $user->email = $googleUser['email'] ?? null;
-        $user->avatar = $googleUser['picture'] ?? null;
-        $user->token = $accessToken;
-        $user->refreshToken = $refreshToken;
-        $user->expiresIn = $expiresIn;
-
-        Log::info("YouTube: no channels found, using Google userinfo: " . ($googleUser['email'] ?? 'unknown'));
-
-        return ['type' => 'user', 'user' => $user];
+        // Step 6: No channels found at all — the Google account has no YouTube channel.
+        // Return an error type so the caller can show a helpful message.
+        return [
+            'type' => 'error',
+            'message' => 'No YouTube channels found for this Google account. Create a YouTube channel first at https://www.youtube.com/create_channel, then try connecting again.',
+        ];
     }
 
     /**
