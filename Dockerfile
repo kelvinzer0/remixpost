@@ -46,8 +46,7 @@ RUN apk add --no-cache \
     nginx supervisor curl \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
-        pdo_mysql zip gd pcntl exif opcache \
-    && apk del --no-cache libpng-dev libjpeg-turbo-dev freetype-dev libxml2-dev oniguruma-dev zlib-dev
+        pdo_mysql zip gd pcntl exif opcache
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache-recommended.ini \

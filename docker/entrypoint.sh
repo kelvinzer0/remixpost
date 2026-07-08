@@ -3,8 +3,19 @@ set -e
 
 cd /app
 
+# Create .env from .env.example if it doesn't exist (for first run)
+if [ ! -f .env ]; then
+    if [ -f .env.example ]; then
+        echo "==> Creating .env from .env.example..."
+        cp .env.example .env
+    else
+        echo "==> Creating empty .env file..."
+        touch .env
+    fi
+fi
+
 # Generate APP_KEY if not set
-if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "" ]; then
+if ! grep -q "^APP_KEY=" .env || grep -q "^APP_KEY=$" .env; then
     echo "==> Generating APP_KEY..."
     php artisan key:generate --force
 fi
