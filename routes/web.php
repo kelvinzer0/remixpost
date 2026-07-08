@@ -25,13 +25,19 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     // Social accounts — OAuth flow
+    // URL pattern matches Postiz: /integrations/social/{provider} for easy migration
     Route::get('/social-accounts', [SocialAccountController::class, 'index'])->name('social-accounts.index');
     Route::get('/social-accounts/connect/{provider}', [SocialAccountController::class, 'redirectToProvider'])->name('social-accounts.connect');
-    Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
-    Route::post('/social-accounts/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
-    Route::post('/social-accounts/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');
-    Route::post('/social-accounts/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
-    Route::post('/social-accounts/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
+
+    // Callback URLs — compatible with Postiz pattern for easy migration
+    Route::get('/integrations/social/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
+    // Legacy callback URL (backward compatible with existing remixpost setups)
+    Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback']);
+
+    Route::post('/integrations/social/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
+    Route::post('/integrations/social/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');
+    Route::post('/integrations/social/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
+    Route::post('/integrations/social/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');
 
     Route::resource('posts', PostController::class);

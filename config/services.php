@@ -1,17 +1,23 @@
 <?php
 
+// Callback URLs use Postiz-compatible pattern: /integrations/social/{provider}
+// This allows users migrating from Postiz to keep their existing OAuth callback
+// URLs registered at each provider's developer portal.
+// Both /integrations/social/{provider} and /social-accounts/callback/{provider}
+// are accepted (backward compatible).
+
 return [
     'twitter' => [
         'client_id' => env('TWITTER_CLIENT_ID'),
         'client_secret' => env('TWITTER_CLIENT_SECRET'),
-        'redirect' => env('TWITTER_REDIRECT_URI', '/social-accounts/callback/twitter'),
+        'redirect' => '/integrations/social/twitter',
         'scopes' => ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
         'pkce' => true,
     ],
     'facebook' => [
         'client_id' => env('FACEBOOK_CLIENT_ID'),
         'client_secret' => env('FACEBOOK_CLIENT_SECRET'),
-        'redirect' => env('FACEBOOK_REDIRECT_URI', '/social-accounts/callback/facebook'),
+        'redirect' => '/integrations/social/facebook',
         'scopes' => ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list',
                      'pages_manage_engagement', 'publish_to_groups',
                      'instagram_content_publish'],
@@ -20,34 +26,34 @@ return [
     'linkedin' => [
         'client_id' => env('LINKEDIN_CLIENT_ID'),
         'client_secret' => env('LINKEDIN_CLIENT_SECRET'),
-        'redirect' => env('LINKEDIN_REDIRECT_URI', '/social-accounts/callback/linkedin'),
+        'redirect' => '/integrations/social/linkedin',
         'scopes' => ['openid', 'profile', 'email',
                      'w_member_social', 'rw_organization', 'r_organization_social'],
     ],
     'youtube' => [
         'client_id' => env('YOUTUBE_CLIENT_ID'),
         'client_secret' => env('YOUTUBE_CLIENT_SECRET'),
-        'redirect' => env('YOUTUBE_REDIRECT_URI', '/social-accounts/callback/youtube'),
+        'redirect' => '/integrations/social/youtube',
         'scopes' => ['https://www.googleapis.com/auth/youtube.upload',
                      'https://www.googleapis.com/auth/youtube'],
     ],
     'tiktok' => [
         'client_id' => env('TIKTOK_CLIENT_ID'),
         'client_secret' => env('TIKTOK_CLIENT_SECRET'),
-        'redirect' => env('TIKTOK_REDIRECT_URI', '/social-accounts/callback/tiktok'),
+        'redirect' => '/integrations/social/tiktok',
         'scopes' => ['video.publish', 'user.info.basic'],
     ],
     'pinterest' => [
         'client_id' => env('PINTEREST_CLIENT_ID'),
         'client_secret' => env('PINTEREST_CLIENT_SECRET'),
-        'redirect' => env('PINTEREST_REDIRECT_URI', '/social-accounts/callback/pinterest'),
+        'redirect' => '/integrations/social/pinterest',
         'scopes' => ['boards:read', 'pins:write'],
     ],
     'mastodon' => [
         'url' => env('MASTODON_URL', 'https://mastodon.social'),
         'client_id' => env('MASTODON_CLIENT_ID'),
         'client_secret' => env('MASTODON_CLIENT_SECRET'),
-        'redirect' => env('MASTODON_REDIRECT_URI', '/social-accounts/callback/mastodon'),
+        'redirect' => '/integrations/social/mastodon',
         'scopes' => ['read', 'write'],
     ],
     'telegram' => [

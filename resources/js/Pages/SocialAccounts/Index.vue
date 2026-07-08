@@ -131,7 +131,7 @@ const manualProviders = providers.filter(p => !p.oauth);
                 </div>
                 <div v-else>
                     <Link v-for="fbAccount in accounts.filter(a => a.provider === 'facebook')" :key="fbAccount.id"
-                        :href="`/social-accounts/connect-instagram`"
+                        :href="`/integrations/social/connect-instagram`"
                         method="post"
                         :data="{ facebook_account_id: fbAccount.id }"
                         as="button"
