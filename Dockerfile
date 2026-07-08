@@ -40,12 +40,13 @@ RUN npm run build
 FROM php:8.3-fpm-alpine AS runtime
 
 RUN apk add --no-cache \
-    libzip libpng libjpeg-turbo freetype libxml2 oniguruma \
-    nginx supervisor curl \
+    libzip-dev libpng-dev libjpeg-turbo-dev freetype-dev libxml2-dev oniguruma-dev \
     zlib-dev \
+    nginx supervisor curl \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
-        pdo_mysql zip gd pcntl exif opcache
+        pdo_mysql zip gd pcntl exif opcache \
+    && apk del --no-cache libpng-dev libjpeg-turbo-dev freetype-dev libxml2-dev oniguruma-dev zlib-dev
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache-recommended.ini \
