@@ -13,6 +13,12 @@ class PublisherFactory
             'facebook' => new FacebookPublisher(),
             'instagram' => new InstagramPublisher(),
             'linkedin' => new LinkedInPublisher(),
+            'mastodon' => new MastodonPublisher(),
+            'telegram' => new TelegramPublisher(),
+            'pinterest' => new PinterestPublisher(),
+            'youtube' => new YouTubePublisher(),
+            'tiktok' => new TikTokPublisher(),
+            'email' => new EmailPublisher(),
             default => throw new InvalidArgumentException("Unknown provider: {$provider}"),
         };
     }

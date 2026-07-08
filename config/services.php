@@ -24,4 +24,34 @@ return [
         'scopes' => ['openid', 'profile', 'email',
                      'w_member_social', 'rw_organization', 'r_organization_social'],
     ],
+    'youtube' => [
+        'client_id' => env('YOUTUBE_CLIENT_ID'),
+        'client_secret' => env('YOUTUBE_CLIENT_SECRET'),
+        'redirect' => env('YOUTUBE_REDIRECT_URI', '/social-accounts/callback/youtube'),
+        'scopes' => ['https://www.googleapis.com/auth/youtube.upload',
+                     'https://www.googleapis.com/auth/youtube'],
+    ],
+    'tiktok' => [
+        'client_id' => env('TIKTOK_CLIENT_ID'),
+        'client_secret' => env('TIKTOK_CLIENT_SECRET'),
+        'redirect' => env('TIKTOK_REDIRECT_URI', '/social-accounts/callback/tiktok'),
+        'scopes' => ['video.publish', 'user.info.basic'],
+    ],
+    'pinterest' => [
+        'client_id' => env('PINTEREST_CLIENT_ID'),
+        'client_secret' => env('PINTEREST_CLIENT_SECRET'),
+        'redirect' => env('PINTEREST_REDIRECT_URI', '/social-accounts/callback/pinterest'),
+        'scopes' => ['boards:read', 'pins:write'],
+    ],
+    'mastodon' => [
+        'url' => env('MASTODON_URL', 'https://mastodon.social'),
+        'client_id' => env('MASTODON_CLIENT_ID'),
+        'client_secret' => env('MASTODON_CLIENT_SECRET'),
+        'redirect' => env('MASTODON_REDIRECT_URI', '/social-accounts/callback/mastodon'),
+        'scopes' => ['read', 'write'],
+    ],
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_TOKEN'),
+        'bot_name' => env('TELEGRAM_BOT_NAME'),
+    ],
 ];

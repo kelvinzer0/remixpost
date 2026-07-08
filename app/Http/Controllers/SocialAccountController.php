@@ -30,7 +30,7 @@ class SocialAccountController extends Controller
      */
     public function redirectToProvider(Request $request, string $provider)
     {
-        $allowed = ['twitter', 'facebook', 'linkedin'];
+        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'mastodon'];
         if (!in_array($provider, $allowed)) {
             return back()->with('error', "Provider {$provider} is not supported.");
         }
@@ -48,7 +48,7 @@ class SocialAccountController extends Controller
      */
     public function handleProviderCallback(Request $request, string $provider)
     {
-        $allowed = ['twitter', 'facebook', 'linkedin'];
+        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'mastodon'];
         if (!in_array($provider, $allowed)) {
             return redirect()->route('social-accounts.index')
                 ->with('error', "Provider {$provider} is not supported.");
@@ -99,6 +99,89 @@ class SocialAccountController extends Controller
             return redirect()->route('social-accounts.index')
                 ->with('error', 'Failed to connect ' . ucfirst($provider) . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Connect a Telegram channel manually (no OAuth — bot token from .env).
+     */
+    public function connectTelegram(Request $request)
+    {
+        $validated = $request->validate([
+            'channel_username' => 'required|string|max:255',
+        ]);
+
+        $botToken = config('services.telegram.bot_token');
+        if (!$botToken) {
+            return back()->with('error', 'TELEGRAM_TOKEN is not configured in .env');
+        }
+
+        $channelUsername = $validated['channel_username'];
+
+        // Verify bot can access the channel by sending a test API call
+        try {
+            $response = \Illuminate\Support\Facades\Http::get(
+                "https://api.telegram.org/bot{$botToken}/getChat",
+                ['chat_id' => $channelUsername]
+            );
+
+            if (!$response->ok() || !($response['ok'] ?? false)) {
+                return back()->with('error', 'Bot cannot access this channel. Make sure the bot is added as admin. Error: ' . ($response['description'] ?? 'Unknown'));
+            }
+
+            $chatInfo = $response['result'];
+
+            SocialAccount::updateOrCreate(
+                [
+                    'provider' => 'telegram',
+                    'provider_id' => $channelUsername,
+                ],
+                [
+                    'user_id' => $request->user()->id,
+                    'name' => $chatInfo['title'] ?? $channelUsername,
+                    'username' => $channelUsername,
+                    'avatar' => null,
+                    'access_token' => $botToken, // Bot token stored per-account (same for all)
+                    'refresh_token' => null,
+                    'is_active' => true,
+                ]
+            );
+
+            return redirect()->route('social-accounts.index')
+                ->with('message', "Telegram channel '{$channelUsername}' connected successfully.");
+
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to connect Telegram: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Connect an email recipient manually (no OAuth — SMTP from .env).
+     */
+    public function connectEmail(Request $request)
+    {
+        $validated = $request->validate([
+            'recipient_email' => 'required|email|max:255',
+            'name' => 'nullable|string|max:255',
+        ]);
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'email',
+                'provider_id' => $validated['recipient_email'],
+            ],
+            [
+                'user_id' => $request->user()->id,
+                'name' => $validated['name'] ?: $validated['recipient_email'],
+                'username' => $validated['recipient_email'],
+                'avatar' => null,
+                'access_token' => 'smtp', // Placeholder — actual SMTP creds in config/mail.php
+                'refresh_token' => null,
+                'is_active' => true,
+            ]
+        );
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Email recipient '{$validated['recipient_email']}' connected successfully.");
     }
 
     /**

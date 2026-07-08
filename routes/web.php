@@ -30,6 +30,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
     Route::post('/social-accounts/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
     Route::post('/social-accounts/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');
+    Route::post('/social-accounts/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
+    Route::post('/social-accounts/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');
 
     Route::resource('posts', PostController::class);
