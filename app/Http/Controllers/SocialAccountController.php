@@ -73,42 +73,13 @@ class SocialAccountController extends Controller
         }
 
         try {
-            $socialiteUser = Socialite::driver($provider)->user();
             $userId = session('oauth_user_id', Auth::id());
 
-            // For Facebook: user must select a Page to post as.
-            // We'll redirect to Page selection after getting user token.
-            if ($provider === 'facebook') {
-                $pages = $this->getFacebookPages(
-                    $socialiteUser->token,
-                    config('services.facebook.graph_version', 'v18.0')
-                );
-
-                if (empty($pages)) {
-                    return redirect()->route('social-accounts.index')
-                        ->with('error', 'No Facebook Pages found. You must be an admin of at least one Page.');
-                }
-
-                // Store user token in session for Page selection step
-                session([
-                    'fb_user_token' => $socialiteUser->token,
-                    'fb_user_name' => $socialiteUser->getName(),
-                    'fb_pages' => $pages,
-                ]);
-
-                return Inertia::render('SocialAccounts/SelectFacebookPage', [
-                    'pages' => $pages,
-                ]);
-            }
-
-            // Twitter, Pinterest, TikTok, Mastodon: store directly
-            // LinkedIn: Socialite tries to fetch email via deprecated API (403).
-            // Use manual flow like Postiz: token exchange + userinfo + page picker.
+            // LinkedIn: use manual flow (no Socialite — it calls deprecated email API)
             if ($provider === 'linkedin') {
                 $linkedResult = $this->handleLinkedInCallback($request);
 
                 if ($linkedResult['type'] === 'select_page') {
-                    // Multiple orgs found — show page picker
                     session([
                         'li_access_token' => $linkedResult['access_token'],
                         'li_refresh_token' => $linkedResult['refresh_token'] ?? null,
@@ -123,15 +94,63 @@ class SocialAccountController extends Controller
                     ]);
                 }
 
-                // Single option — store directly
                 $socialiteUser = $linkedResult['user'];
-            } else if ($provider !== 'facebook' && $provider !== 'youtube') {
-                $socialiteUser = Socialite::driver($provider)->user();
+                $this->createSocialAccount($userId, $provider, $socialiteUser);
+                return redirect()->route('social-accounts.index')
+                    ->with('message', ucfirst($provider) . ' account connected successfully.');
             }
 
-            if ($provider !== 'facebook' && $provider !== 'youtube') {
+            // YouTube: manual flow with channel picker
+            if ($provider === 'youtube') {
+                $youtubeResult = $this->handleYouTubeCallback($request);
+
+                if ($youtubeResult['type'] === 'select_channel') {
+                    session([
+                        'yt_access_token' => $youtubeResult['access_token'],
+                        'yt_refresh_token' => $youtubeResult['refresh_token'] ?? null,
+                        'yt_expires_in' => $youtubeResult['expires_in'] ?? null,
+                        'yt_channels' => $youtubeResult['channels'],
+                        'oauth_user_id' => $userId,
+                    ]);
+                    return Inertia::render('SocialAccounts/SelectYoutubeChannel', [
+                        'channels' => $youtubeResult['channels'],
+                    ]);
+                }
+
+                $socialiteUser = $youtubeResult['user'];
                 $this->createSocialAccount($userId, $provider, $socialiteUser);
+                return redirect()->route('social-accounts.index')
+                    ->with('message', ucfirst($provider) . ' account connected successfully.');
             }
+
+            // Facebook, Twitter, Pinterest, TikTok, Mastodon: use Socialite
+            $socialiteUser = Socialite::driver($provider)->user();
+
+            // Facebook: user must select a Page to post as.
+            if ($provider === 'facebook') {
+                $pages = $this->getFacebookPages(
+                    $socialiteUser->token,
+                    config('services.facebook.graph_version', 'v18.0')
+                );
+
+                if (empty($pages)) {
+                    return redirect()->route('social-accounts.index')
+                        ->with('error', 'No Facebook Pages found. You must be an admin of at least one Page.');
+                }
+
+                session([
+                    'fb_user_token' => $socialiteUser->token,
+                    'fb_user_name' => $socialiteUser->getName(),
+                    'fb_pages' => $pages,
+                ]);
+
+                return Inertia::render('SocialAccounts/SelectFacebookPage', [
+                    'pages' => $pages,
+                ]);
+            }
+
+            // Store directly for Twitter, Pinterest, TikTok, Mastodon
+            $this->createSocialAccount($userId, $provider, $socialiteUser);
 
             return redirect()->route('social-accounts.index')
                 ->with('message', ucfirst($provider) . ' account connected successfully.');
