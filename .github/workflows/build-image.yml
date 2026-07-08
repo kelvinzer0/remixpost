@@ -22,7 +22,9 @@ jobs:
           coverage: none
 
       - name: Install Composer dependencies
-        run: composer install --no-dev --no-interaction --prefer-dist --ignore-platform-reqs --no-audit
+        env:
+          COMPOSER_NO_AUDIT: 1
+        run: composer install --no-dev --no-interaction --prefer-dist --ignore-platform-reqs
 
       - name: Check PHP syntax
         run: find app/ config/ routes/ database/ -name "*.php" -exec php -l {} \;
