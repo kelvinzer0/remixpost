@@ -46,6 +46,7 @@ RUN apk add --no-cache \
     libzip-dev libpng-dev libjpeg-turbo-dev freetype-dev libxml2-dev oniguruma-dev \
     zlib-dev \
     nginx supervisor curl \
+    ffmpeg \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
         pdo_mysql zip gd pcntl exif opcache

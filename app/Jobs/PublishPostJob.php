@@ -61,9 +61,22 @@ class PublishPostJob implements ShouldQueue
             ]);
 
             // Update pivot table with result
+            // Note: even on success, we may attach a warning/info message in
+            // failure_reason field (prefixed with [INFO] or [WARNING]) so the
+            // user can see post-publish notes (e.g. YouTube Shorts criteria check).
+            $note = null;
+            if ($result['success']) {
+                if (!empty($result['warning'])) {
+                    $note = '[WARNING] ' . $result['warning'];
+                } elseif (!empty($result['info'])) {
+                    $note = '[INFO] ' . $result['info'];
+                }
+            }
             $post->socialAccounts()->updateExistingPivot($account->id, [
                 'external_post_id' => $result['external_id'] ?? null,
-                'failure_reason' => $result['success'] ? null : ($result['error'] ?? 'Unknown error'),
+                'failure_reason' => $result['success']
+                    ? $note  // null on clean success, or [WARNING]/[INFO] note
+                    : ($result['error'] ?? 'Unknown error'),
                 'published_at' => $result['success'] ? now() : null,
             ]);
 

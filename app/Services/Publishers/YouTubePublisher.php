@@ -3,6 +3,7 @@
 namespace App\Services\Publishers;
 
 use App\Services\MediaType;
+use App\Services\VideoAnalyzer;
 use Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Stream;
@@ -98,6 +99,36 @@ class YouTubePublisher implements PublisherInterface
                 }
                 $tags = ['shorts', 'short', 'youtube shorts'];
                 $categoryId = '24'; // Entertainment (commonly used for Shorts)
+
+                // Pre-upload validation: check if video meets Shorts criteria.
+                // YouTube auto-classifies Shorts based on:
+                //   1. Aspect ratio 9:16 (vertical) or 1:1 (square)
+                //   2. Duration ≤ 60 seconds
+                // #shorts hashtag and categoryId do NOT force YouTube to treat
+                // a horizontal or long video as a Short.
+                $analysis = VideoAnalyzer::analyze($videoUrl);
+                $shortsCheck = VideoAnalyzer::meetsShortsCriteria($analysis);
+
+                if ($shortsCheck['meets_criteria'] === false) {
+                    // Video doesn't meet Shorts criteria — log warning but still
+                    // upload (user may want to proceed anyway). The warning will
+                    // appear in the post result so the user knows.
+                    $warning = 'YouTube Shorts criteria not met: ' . implode('; ', $shortsCheck['reasons'])
+                        . '. Video will be uploaded but YouTube may classify it as a regular video, not a Short.';
+                    Log::warning('YouTube Shorts validation failed', [
+                        'video_url' => $videoUrl,
+                        'reasons' => $shortsCheck['reasons'],
+                    ]);
+                } elseif ($shortsCheck['meets_criteria'] === true) {
+                    $info = sprintf(
+                        'Video meets Shorts criteria: %dx%d (%s), %.1fs duration',
+                        $analysis['width'],
+                        $analysis['height'],
+                        $analysis['aspect_ratio'],
+                        $analysis['duration']
+                    );
+                    Log::info('YouTube Shorts validation passed', ['info' => $info]);
+                }
             }
 
             // Step 1: Initiate resumable upload
@@ -163,11 +194,31 @@ class YouTubePublisher implements PublisherInterface
                 ? 'https://www.youtube.com/shorts/' . $body['id']
                 : 'https://www.youtube.com/watch?v=' . $body['id'];
 
-            return [
+            $result = [
                 'success' => true,
                 'external_id' => $body['id'],
                 'url' => $videoUrl2,
             ];
+
+            // Attach warning/info for Shorts mode so the user understands
+            // why a video may not appear in the Shorts feed immediately.
+            if ($uploadMode === 'short') {
+                if (isset($shortsCheck)) {
+                    if ($shortsCheck['meets_criteria'] === false) {
+                        $result['warning'] = $warning ?? 'Video may not qualify as a Short.';
+                    } elseif ($shortsCheck['meets_criteria'] === true) {
+                        $result['info'] = 'Video meets Shorts criteria. '
+                            . 'YouTube takes 24-48h to process and classify it as a Short. '
+                            . 'Until then it appears as a regular video. '
+                            . 'Visit https://www.youtube.com/@yourchannel/shorts to verify.';
+                    } else {
+                        $result['info'] = 'Could not pre-validate video for Shorts criteria (ffprobe not installed). '
+                            . 'YouTube will auto-classify based on aspect ratio (9:16 vertical) and duration (≤60s).';
+                    }
+                }
+            }
+
+            return $result;
         } catch (\GuzzleHttp\Exception\ClientException $e) {
             $resp = $e->getResponse();
             $body = $resp ? json_decode($resp->getBody()->getContents(), true) : null;
