@@ -49,6 +49,9 @@ php artisan storage:link 2>/dev/null || true
 # Cache config & routes (production optimizations)
 if [ "$APP_ENV" = "production" ]; then
     echo "==> Caching config and routes..."
+    # Export APP_KEY from .env so config:cache picks it up
+    # (docker env_file may have empty APP_KEY that overrides .env)
+    export APP_KEY=$(grep "^APP_KEY=" .env | cut -d'=' -f2-)
     php artisan config:cache
     php artisan route:cache
     php artisan view:cache
