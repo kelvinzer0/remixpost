@@ -15,6 +15,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
+
+        // Force HTTPS when behind a reverse proxy / tunnel
+        if (env('APP_FORCE_HTTPS', false)) {
+            $middleware->trustProxies(at: '*');
+            \Illuminate\Support\Facades\URL::forceScheme('https');
+        }
+
         $middleware->alias([
             'auth' => \App\Http\Middleware\Authenticate::class,
             'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
