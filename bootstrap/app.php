@@ -16,10 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
-        // Force HTTPS when behind a reverse proxy / tunnel
+        // Trust all proxies when behind reverse proxy / tunnel
         if (env('APP_FORCE_HTTPS', false)) {
             $middleware->trustProxies(at: '*');
-            \Illuminate\Support\Facades\URL::forceScheme('https');
         }
 
         $middleware->alias([
