@@ -95,31 +95,37 @@ class SocialAccountController extends Controller
                 ]);
             }
 
-            // Twitter and LinkedIn: store the account directly
-            // YouTube: SocialiteProviders driver calls YouTube API which can 401
-            // for brand accounts. Fallback: manual token exchange + channel selection.
-            if ($provider === 'youtube') {
-                $youtubeResult = $this->handleYouTubeCallback($request);
+            // Twitter, Pinterest, TikTok, Mastodon: store directly
+            // LinkedIn: Socialite tries to fetch email via deprecated API (403).
+            // Use manual flow like Postiz: token exchange + userinfo + page picker.
+            if ($provider === 'linkedin') {
+                $linkedResult = $this->handleLinkedInCallback($request);
 
-                if ($youtubeResult['type'] === 'select_channel') {
-                    // Multiple channels (personal + brand) — show picker
+                if ($linkedResult['type'] === 'select_page') {
+                    // Multiple orgs found — show page picker
                     session([
-                        'yt_access_token' => $youtubeResult['access_token'],
-                        'yt_refresh_token' => $youtubeResult['refresh_token'] ?? null,
-                        'yt_expires_in' => $youtubeResult['expires_in'] ?? null,
-                        'yt_channels' => $youtubeResult['channels'],
+                        'li_access_token' => $linkedResult['access_token'],
+                        'li_refresh_token' => $linkedResult['refresh_token'] ?? null,
+                        'li_expires_in' => $linkedResult['expires_in'] ?? null,
+                        'li_pages' => $linkedResult['pages'],
+                        'li_personal' => $linkedResult['personal'],
                         'oauth_user_id' => $userId,
                     ]);
-                    return Inertia::render('SocialAccounts/SelectYoutubeChannel', [
-                        'channels' => $youtubeResult['channels'],
+                    return Inertia::render('SocialAccounts/SelectLinkedinPage', [
+                        'pages' => $linkedResult['pages'],
+                        'personal' => $linkedResult['personal'],
                     ]);
                 }
 
-                // Single channel or fallback — store directly
-                $socialiteUser = $youtubeResult['user'];
+                // Single option — store directly
+                $socialiteUser = $linkedResult['user'];
+            } else if ($provider !== 'facebook' && $provider !== 'youtube') {
+                $socialiteUser = Socialite::driver($provider)->user();
             }
 
-            $this->createSocialAccount($userId, $provider, $socialiteUser);
+            if ($provider !== 'facebook' && $provider !== 'youtube') {
+                $this->createSocialAccount($userId, $provider, $socialiteUser);
+            }
 
             return redirect()->route('social-accounts.index')
                 ->with('message', ucfirst($provider) . ' account connected successfully.');
@@ -129,6 +135,169 @@ class SocialAccountController extends Controller
             return redirect()->route('social-accounts.index')
                 ->with('error', 'Failed to connect ' . ucfirst($provider) . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Handle LinkedIn OAuth callback — manual flow (no Socialite).
+     * Uses OIDC userinfo endpoint (not deprecated email API).
+     * Fetches org pages for page selection (like Postiz).
+     */
+    private function handleLinkedInCallback(Request $request): array
+    {
+        // Step 1: Exchange code for access token
+        $tokenResponse = Http::asForm()->post('https://www.linkedin.com/oauth/v2/accessToken', [
+            'grant_type' => 'authorization_code',
+            'code' => $request->get('code'),
+            'redirect_uri' => url('/integrations/social/linkedin'),
+            'client_id' => config('services.linkedin.client_id'),
+            'client_secret' => config('services.linkedin.client_secret'),
+        ])->json();
+
+        $accessToken = $tokenResponse['access_token'] ?? null;
+        $refreshToken = $tokenResponse['refresh_token'] ?? null;
+        $expiresIn = $tokenResponse['expires_in'] ?? null;
+
+        if (!$accessToken) {
+            throw new \Exception('Failed to get LinkedIn access token: ' . json_encode($tokenResponse));
+        }
+
+        // Step 2: Get user info via OIDC userinfo (NOT deprecated /v2/emailAddress)
+        $userInfo = Http::withToken($accessToken)
+            ->get('https://api.linkedin.com/v2/userinfo')
+            ->json();
+
+        $userId = $userInfo['sub'] ?? null;
+        $userName = $userInfo['name'] ?? 'LinkedIn User';
+        $userPicture = $userInfo['picture'] ?? null;
+
+        if (!$userId) {
+            throw new \Exception('Failed to get LinkedIn user info: ' . json_encode($userInfo));
+        }
+
+        // Step 3: Create personal account user object
+        $personalUser = new \Laravel\Socialite\Two\User();
+        $personalUser->id = $userId;
+        $personalUser->name = $userName;
+        $personalUser->avatar = $userPicture;
+        $personalUser->token = $accessToken;
+        $personalUser->refreshToken = $refreshToken;
+        $personalUser->expiresIn = $expiresIn;
+
+        $personal = [
+            'id' => $userId,
+            'name' => $userName,
+            'picture' => $userPicture,
+            'type' => 'personal',
+        ];
+
+        // Step 4: Fetch organization pages where user is admin
+        $pages = [];
+        try {
+            $orgsResponse = Http::withToken($accessToken)
+                ->withHeaders([
+                    'X-Restli-Protocol-Version' => '2.0.0',
+                    'LinkedIn-Version' => '202601',
+                ])
+                ->get('https://api.linkedin.com/v2/organizationalEntityAcls', [
+                    'q' => 'roleAssignee',
+                    'role' => 'ADMINISTRATOR',
+                    'projection' => '(elements*(organizationalTarget~(localizedName,vanityName,logoV2(original~:playableStreams))))',
+                ])->json();
+
+            if (isset($orgsResponse['elements'])) {
+                foreach ($orgsResponse['elements'] as $el) {
+                    $org = $el['organizationalTarget~'] ?? null;
+                    if ($org) {
+                        $pages[] = [
+                            'id' => $el['organizationalTarget'],
+                            'name' => $org['localizedName'] ?? 'Organization',
+                            'vanityName' => $org['vanityName'] ?? null,
+                            'logo' => $org['logoV2']['original~']['playableStreams'][0] ?? null,
+                            'type' => 'page',
+                        ];
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning("LinkedIn org fetch failed: " . $e->getMessage());
+        }
+
+        Log::info("LinkedIn: user={$userName}, found " . count($pages) . " org page(s)");
+
+        // Step 5: If org pages found → show picker (personal + pages)
+        if (count($pages) > 0) {
+            return [
+                'type' => 'select_page',
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'expires_in' => $expiresIn,
+                'personal' => $personal,
+                'pages' => $pages,
+            ];
+        }
+
+        // Step 6: No org pages — store personal account only
+        return ['type' => 'user', 'user' => $personalUser];
+    }
+
+    /**
+     * Store selected LinkedIn account (personal or page).
+     */
+    public function selectLinkedinPage(Request $request)
+    {
+        $validated = $request->validate([
+            'account_type' => 'required|string|in:personal,page',
+            'page_id' => 'nullable|string',
+        ]);
+
+        $userId = session('oauth_user_id', Auth::id());
+        $accessToken = session('li_access_token');
+        $refreshToken = session('li_refresh_token');
+        $expiresIn = session('li_expires_in');
+
+        if ($validated['account_type'] === 'personal') {
+            $personal = session('li_personal');
+            SocialAccount::updateOrCreate(
+                ['provider' => 'linkedin', 'provider_id' => $personal['id']],
+                [
+                    'user_id' => $userId,
+                    'name' => $personal['name'],
+                    'username' => $personal['name'],
+                    'avatar' => $personal['picture'],
+                    'access_token' => $accessToken,
+                    'refresh_token' => $refreshToken,
+                    'expires_at' => $expiresIn ? now()->addSeconds($expiresIn) : null,
+                    'is_active' => true,
+                ]
+            );
+            $name = $personal['name'];
+        } else {
+            $pages = session('li_pages', []);
+            $selected = collect($pages)->firstWhere('id', $validated['page_id']);
+            if (!$selected) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Invalid page selection.');
+            }
+            SocialAccount::updateOrCreate(
+                ['provider' => 'linkedin', 'provider_id' => $selected['id']],
+                [
+                    'user_id' => $userId,
+                    'name' => $selected['name'],
+                    'username' => $selected['vanityName'] ?? $selected['name'],
+                    'avatar' => $selected['logo'],
+                    'access_token' => $accessToken,
+                    'refresh_token' => $refreshToken,
+                    'expires_at' => $expiresIn ? now()->addSeconds($expiresIn) : null,
+                    'is_active' => true,
+                ]
+            );
+            $name = $selected['name'];
+        }
+
+        session()->forget(['li_access_token', 'li_refresh_token', 'li_expires_in', 'li_pages', 'li_personal', 'oauth_user_id']);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "LinkedIn '{$name}' connected successfully.");
     }
 
     /**

@@ -39,6 +39,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/integrations/social/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
     Route::post('/integrations/social/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
     Route::post('/integrations/social/select-youtube-channel', [SocialAccountController::class, 'selectYoutubeChannel'])->name('social-accounts.select-youtube-channel');
+    Route::post('/integrations/social/select-linkedin-page', [SocialAccountController::class, 'selectLinkedinPage'])->name('social-accounts.select-linkedin-page');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');
 
     Route::resource('posts', PostController::class);
