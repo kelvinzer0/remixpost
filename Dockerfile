@@ -22,11 +22,12 @@ WORKDIR /app
 
 # Install PHP deps first (better caching)
 COPY composer.json composer.lock* ./
-RUN composer install --no-dev --no-scripts --no-autoloader --no-interaction
+RUN composer install --no-dev --no-scripts --no-autoloader --no-interaction || \
+    composer install --no-dev --no-scripts --no-autoloader --no-interaction --ignore-platform-reqs
 
-# Install npm deps + build assets
+# Install npm deps (use install instead of ci since no lockfile yet)
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install
+RUN npm install
 
 COPY . .
 
