@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'default' => env('CACHE_STORE', env('CACHE_DRIVER', 'database')),
+    'default' => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
     'stores' => [
         'array' => ['driver' => 'array', 'serialize' => false],
         'database' => [

@@ -3,18 +3,6 @@ name: Build & Push Docker Image
 on:
   push:
     branches: [main]
-    paths:
-      - 'app/**'
-      - 'database/**'
-      - 'resources/**'
-      - 'routes/**'
-      - 'config/**'
-      - 'docker/**'
-      - 'Dockerfile'
-      - 'composer.json'
-      - 'composer.lock'
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +10,28 @@ permissions:
   packages: write
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --ignore-platform-reqs
+
+      - name: Check PHP syntax
+        run: find app/ config/ routes/ database/ -name "*.php" -exec php -l {} \;
+
+      - name: Run Pint (code style)
+        run: vendor/bin/pint --test
+
   build:
+    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
