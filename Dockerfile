@@ -42,6 +42,7 @@ FROM php:8.3-fpm-alpine AS runtime
 RUN apk add --no-cache \
     libzip libpng libjpeg-turbo freetype libxml2 oniguruma \
     nginx supervisor curl \
+    zlib-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
         pdo_mysql zip gd pcntl exif opcache
