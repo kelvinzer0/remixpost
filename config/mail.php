@@ -23,7 +23,7 @@ return [
         ],
     ],
     'from' => [
-        'address' => env('MAIL_FROM_ADDRESS', 'noreply@remixpost.local'),
+        'address' => env('SMTP_USER', env('MAIL_FROM_ADDRESS', 'noreply@remixpost.local')),
         'name' => env('MAIL_FROM_NAME', 'remixpost'),
     ],
 ];
