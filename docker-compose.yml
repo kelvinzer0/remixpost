@@ -1,0 +1,58 @@
+# remixpost — self-hosted social media management
+# Apache 2.0 License
+
+services:
+  app:
+    build: .
+    image: ghcr.io/kelvinzer0/remixpost:latest
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - app_storage:/app/storage
+      - app_public:/app/public
+    ports:
+      - "${APP_PORT:-8080}:80"
+    networks:
+      - remixpost_net
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-remixpost}
+      MYSQL_USER: ${DB_USERNAME:-remixpost}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root-change-me}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - remixpost_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - remixpost_net
+
+networks:
+  remixpost_net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  app_storage:
+  app_public:

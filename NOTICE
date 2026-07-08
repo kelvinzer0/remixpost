@@ -1,0 +1,27 @@
+remixpost
+Copyright 2024 Kelvin Yuli Andrian
+
+This product includes software developed as part of remixpost
+(https://github.com/kelvinzer0/remixpost).
+
+This software is licensed under the Apache License, Version 2.0.
+
+== Third-Party Software ==
+
+This product includes the following third-party software components,
+each licensed under their respective licenses:
+
+- Laravel Framework — MIT License (https://laravel.com)
+- Vue.js 3 — MIT License (https://vuejs.org)
+- Inertia.js — MIT License (https://inertiajs.com)
+- Tailwind CSS — MIT License (https://tailwindcss.com)
+- TwitterOAuth (abraham/twitteroauth) — MIT License
+- Facebook Graph SDK — Facebook Platform License
+- Vite — MIT License (https://vitejs.dev)
+- FullCalendar — MIT License (https://fullcalendar.io)
+
+The inspiration for this project's features and UX design draws from
+social media management tools like Mixpost (inovector/mixpost) and
+Postiz (gitroomhq/postiz-app), both of which are open source projects
+we respect and learn from. remixpost is an independent implementation
+written from scratch with its own code, design, and architecture.
