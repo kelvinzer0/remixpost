@@ -312,9 +312,9 @@ class SocialAccountController extends Controller
                 'username' => $socialiteUser->getNickname() ?? $socialiteUser->getEmail(),
                 'avatar' => $socialiteUser->getAvatar(),
                 'access_token' => $socialiteUser->token,
-                'refresh_token' => $socialiteUser->refreshToken ?? method_exists($socialiteUser, 'getRefreshToken')
-                    ? $socialiteUser->getRefreshToken()
-                    : null,
+                'refresh_token' => $socialiteUser->refreshToken
+                    ?? (method_exists($socialiteUser, 'getRefreshToken') ? $socialiteUser->getRefreshToken() : null)
+                    ?? (property_exists($socialiteUser, 'refreshToken') ? $socialiteUser->refreshToken : null),
                 'expires_at' => $socialiteUser->expiresIn
                     ? now()->addSeconds($socialiteUser->expiresIn)
                     : null,
