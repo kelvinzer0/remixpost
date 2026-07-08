@@ -66,7 +66,14 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Storage permissions
-RUN chown -R www-data:www-data /app/storage /app/bootstrap/cache
+RUN mkdir -p /app/storage/app/public \
+        /app/storage/framework/cache \
+        /app/storage/framework/sessions \
+        /app/storage/framework/views \
+        /app/storage/logs \
+        /app/bootstrap/cache \
+    && chown -R www-data:www-data /app/storage /app/bootstrap/cache \
+    || chown -R nobody:nobody /app/storage /app/bootstrap/cache
 
 EXPOSE 80
 
