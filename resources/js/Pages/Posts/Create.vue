@@ -22,16 +22,16 @@ const showMediaPicker = ref(false);
 
 // Provider meta fallback (in case platformRequirements is not loaded)
 const providerFallback = {
-    twitter: { label: 'Twitter/X', color: 'bg-black' },
-    facebook: { label: 'Facebook', color: 'bg-blue-600' },
-    linkedin: { label: 'LinkedIn', color: 'bg-blue-700' },
-    instagram: { label: 'Instagram', color: 'bg-pink-500' },
-    youtube: { label: 'YouTube', color: 'bg-red-600' },
-    tiktok: { label: 'TikTok', color: 'bg-black' },
-    pinterest: { label: 'Pinterest', color: 'bg-red-700' },
-    mastodon: { label: 'Mastodon', color: 'bg-purple-600' },
-    telegram: { label: 'Telegram', color: 'bg-blue-500' },
-    email: { label: 'Email', color: 'bg-gray-600' },
+    twitter: { label: 'Twitter/X', color: 'bg-black', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    facebook: { label: 'Facebook', color: 'bg-blue-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    linkedin: { label: 'LinkedIn', color: 'bg-blue-700', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    instagram: { label: 'Instagram', color: 'bg-pink-500', supports_image: true, supports_video: true, requires_media: true, allows_text_only: false },
+    youtube: { label: 'YouTube', color: 'bg-red-600', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
+    tiktok: { label: 'TikTok', color: 'bg-black', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
+    pinterest: { label: 'Pinterest', color: 'bg-red-700', supports_image: true, supports_video: true, requires_media: true, allows_text_only: false },
+    mastodon: { label: 'Mastodon', color: 'bg-purple-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    telegram: { label: 'Telegram', color: 'bg-blue-500', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    email: { label: 'Email', color: 'bg-gray-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
 };
 
 const getReq = (provider) => platformRequirements.value[provider] || providerFallback[provider] || { label: provider, color: 'bg-gray-500' };
@@ -71,6 +71,16 @@ const checkProvider = (provider) => {
         }
         if (req.media_type === 'video' && !hasVideo) {
             return { ok: false, message: 'Requires a video file' };
+        }
+    }
+
+    // Supported-type check (when media present but type unsupported)
+    if (hasMedia) {
+        if (!req.supports_image && hasImage && !hasVideo) {
+            return { ok: false, message: 'Does not support image-only posts. Add a video file.' };
+        }
+        if (!req.supports_video && hasVideo && !hasImage) {
+            return { ok: false, message: 'Does not support video posts. Add an image file.' };
         }
     }
 
@@ -187,7 +197,7 @@ const minDate = () => {
                                 <div class="flex items-center gap-2 flex-wrap">
                                     <p class="text-sm font-medium text-gray-900">{{ account.name }}</p>
                                     <span class="text-xs text-gray-500 capitalize">{{ getReq(account.provider).label }}</span>
-                                    <!-- Required badges -->
+                                    <!-- Required badges (when media is mandatory) -->
                                     <span v-if="getReq(account.provider).requires_media && getReq(account.provider).media_type === 'image'"
                                         class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-800 border border-amber-200">
                                         IMAGE REQUIRED
@@ -198,8 +208,23 @@ const minDate = () => {
                                     </span>
                                     <span v-else-if="getReq(account.provider).requires_media"
                                         class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                        MEDIA REQUIRED
+                                        IMAGE/VIDEO REQUIRED
                                     </span>
+                                    <!-- Supported badges (when media is optional) -->
+                                    <template v-else>
+                                        <span v-if="getReq(account.provider).supports_image"
+                                            class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800 border border-green-200">
+                                            IMAGE OK
+                                        </span>
+                                        <span v-if="getReq(account.provider).supports_video"
+                                            class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800 border border-green-200">
+                                            VIDEO OK
+                                        </span>
+                                        <span v-if="!getReq(account.provider).supports_image && !getReq(account.provider).supports_video"
+                                            class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-600 border border-gray-200">
+                                            TEXT ONLY
+                                        </span>
+                                    </template>
                                     <span v-if="getReq(account.provider).max_content_length"
                                         class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-800 border border-blue-200">
                                         MAX {{ getReq(account.provider).max_content_length }} CHARS

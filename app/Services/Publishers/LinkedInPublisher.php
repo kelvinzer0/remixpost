@@ -9,11 +9,16 @@ use GuzzleHttp\Client;
  * LinkedIn Publisher — posts to personal feed or Company Pages via API v2.
  *
  * Authentication: OAuth 2.0 with access_token. Scope w_member_social for personal,
- * rw_organization + r_organization_social for Company Pages.
+ * rw_organization_admin + w_organization_social + r_organization_social for Company Pages.
  *
  * API endpoints used:
  *   - POST https://api.linkedin.com/v2/ugcPosts (create post)
  *   - POST https://api.linkedin.com/v2/assets?action=registerUpload (register media upload)
+ *
+ * Supported media:
+ *   - Images: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-image
+ *   - Videos: registerUpload with recipe urn:li:digitalmediaRecipe:feedshare-video
+ *   - shareMediaCategory: IMAGE for image-only, VIDEO for video-only, NONE for text-only
  *
  * Reference: https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/ugc-post-api
  *
@@ -26,7 +31,7 @@ class LinkedInPublisher implements PublisherInterface
     public function __construct()
     {
         $this->httpClient = new Client([
-            'timeout' => 30,
+            'timeout' => 120,
             'connect_timeout' => 10,
         ]);
     }
@@ -60,23 +65,47 @@ class LinkedInPublisher implements PublisherInterface
                 ],
             ];
 
-            // Handle media
-            if (!empty($mediaUrls)) {
+            // Categorize media
+            $imageUrls = [];
+            $videoUrls = [];
+            foreach ($mediaUrls as $url) {
+                if ($this->isVideoUrl($url)) {
+                    $videoUrls[] = $url;
+                } else {
+                    $imageUrls[] = $url;
+                }
+            }
+
+            // Handle media — prefer images if mixed (LinkedIn only allows one category per post)
+            if (!empty($imageUrls)) {
                 $media = [];
-                foreach ($mediaUrls as $url) {
-                    $assetUrn = $this->uploadMedia($url, $accessToken, $authorUrn);
+                foreach ($imageUrls as $url) {
+                    $assetUrn = $this->uploadMedia($url, $accessToken, $authorUrn, 'image');
                     if ($assetUrn) {
                         $media[] = [
                             'status' => 'READY',
                             'description' => ['text' => ''],
                             'media' => $assetUrn,
-                            'mediaType' => $this->detectMediaType($url),
+                            'mediaType' => 'IMAGE',
                         ];
                     }
                 }
                 if (!empty($media)) {
                     $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'IMAGE';
                     $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = $media;
+                }
+            } elseif (!empty($videoUrls)) {
+                // Video post — single video only
+                $url = $videoUrls[0];
+                $assetUrn = $this->uploadMedia($url, $accessToken, $authorUrn, 'video');
+                if ($assetUrn) {
+                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'VIDEO';
+                    $ugcPost['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
+                        'status' => 'READY',
+                        'description' => ['text' => mb_substr($content, 0, 300)],
+                        'media' => $assetUrn,
+                        'mediaType' => 'VIDEO',
+                    ]];
                 }
             }
 
@@ -112,10 +141,15 @@ class LinkedInPublisher implements PublisherInterface
 
     /**
      * Upload media to LinkedIn using registerUpload flow.
+     * Uses feedshare-image recipe for images, feedshare-video recipe for videos.
      */
-    private function uploadMedia(string $url, string $accessToken, string $authorUrn): ?string
+    private function uploadMedia(string $url, string $accessToken, string $authorUrn, string $type = 'image'): ?string
     {
         try {
+            $recipe = $type === 'video'
+                ? 'urn:li:digitalmediaRecipe:feedshare-video'
+                : 'urn:li:digitalmediaRecipe:feedshare-image';
+
             // Step 1: Register upload to get upload URL
             $registerResponse = $this->httpClient->post(
                 'https://api.linkedin.com/v2/assets?action=registerUpload',
@@ -126,7 +160,7 @@ class LinkedInPublisher implements PublisherInterface
                     ],
                     'json' => [
                         'registerUploadRequest' => [
-                            'recipes' => ['urn:li:digitalmediaRecipe:feedshare-image'],
+                            'recipes' => [$recipe],
                             'owner' => $authorUrn,
                             'serviceRelationships' => [
                                 [
@@ -148,16 +182,19 @@ class LinkedInPublisher implements PublisherInterface
                 return null;
             }
 
-            // Step 2: Download image and upload to LinkedIn's upload URL
-            $imageResponse = $this->httpClient->get($url);
-            $imageData = $imageResponse->getBody()->getContents();
+            // Step 2: Download media and upload to LinkedIn's upload URL
+            $mediaResponse = $this->httpClient->get($url);
+            $mediaData = $mediaResponse->getBody()->getContents();
+            $mediaMime = $mediaResponse->getHeaderLine('Content-Type') ?: (
+                $type === 'video' ? 'video/mp4' : 'application/octet-stream'
+            );
 
             $this->httpClient->put($uploadUrl, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $accessToken,
-                    'Content-Type' => 'application/octet-stream',
+                    'Content-Type' => $mediaMime,
                 ],
-                'body' => $imageData,
+                'body' => $mediaData,
             ]);
 
             return $assetUrn;
@@ -166,15 +203,9 @@ class LinkedInPublisher implements PublisherInterface
         }
     }
 
-    private function detectMediaType(string $url): string
+    private function isVideoUrl(string $url): bool
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        if (in_array($extension, ['mp4', 'mov', 'avi', 'webm'])) {
-            return 'VIDEO';
-        }
-
-        return 'IMAGE';
+        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+        return in_array($ext, ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v']);
     }
 }

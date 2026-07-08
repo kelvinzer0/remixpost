@@ -10,13 +10,15 @@ namespace App\Services;
  *  - Inertia shared data (frontend live validation in Posts/Create.vue and Posts/Edit.vue)
  *
  * Schema for each provider:
- *  - requires_media: bool      — at least one media item is mandatory
- *  - media_type: string|null   — 'image' | 'video' | null (any)
- *  - allows_text_only: bool    — true if posting text without media is allowed
+ *  - requires_media: bool        — at least one media item is mandatory
+ *  - media_type: string|null     — 'image' | 'video' | null (any)
+ *  - allows_text_only: bool      — true if posting text without media is allowed
+ *  - supports_image: bool        — true if image upload is supported (optional or required)
+ *  - supports_video: bool        — true if video upload is supported (optional or required)
  *  - max_content_length: int|null — provider-specific character limit (null = no limit)
- *  - label: string             — human-readable name
- *  - color: string             — tailwind bg-* class for avatar/badge
- *  - notes: string             — extra guidance for user
+ *  - label: string               — human-readable name
+ *  - color: string               — tailwind bg-* class for avatar/badge
+ *  - notes: string               — extra guidance for user
  */
 class PlatformRequirements
 {
@@ -29,8 +31,10 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 280,
-                'notes' => 'Text-only OK. Max 280 characters for free accounts.',
+                'notes' => 'Text-only OK. Max 280 chars for free accounts. Supports up to 4 images or 1 video.',
             ],
             'facebook' => [
                 'label' => 'Facebook',
@@ -38,8 +42,10 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 63206,
-                'notes' => 'Text-only OK. Image/video optional.',
+                'notes' => 'Text-only OK. Supports multiple images or single video.',
             ],
             'linkedin' => [
                 'label' => 'LinkedIn',
@@ -47,8 +53,10 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 3000,
-                'notes' => 'Text-only OK. Image/video optional.',
+                'notes' => 'Text-only OK. Supports multiple images OR single video per post.',
             ],
             'instagram' => [
                 'label' => 'Instagram',
@@ -56,8 +64,10 @@ class PlatformRequirements
                 'requires_media' => true,
                 'media_type' => null, // image OR video
                 'allows_text_only' => false,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 2200,
-                'notes' => 'REQUIRES at least one image or video. Text-only posts not supported by Instagram API.',
+                'notes' => 'REQUIRES image or video. Text-only not supported by Instagram API.',
             ],
             'youtube' => [
                 'label' => 'YouTube',
@@ -65,8 +75,10 @@ class PlatformRequirements
                 'requires_media' => true,
                 'media_type' => 'video',
                 'allows_text_only' => false,
+                'supports_image' => false,
+                'supports_video' => true,
                 'max_content_length' => 5000,
-                'notes' => 'REQUIRES a video file. Content text becomes video description. Image-only posts not supported.',
+                'notes' => 'REQUIRES a video file. Content becomes video description.',
             ],
             'tiktok' => [
                 'label' => 'TikTok',
@@ -74,17 +86,21 @@ class PlatformRequirements
                 'requires_media' => true,
                 'media_type' => 'video',
                 'allows_text_only' => false,
+                'supports_image' => false,
+                'supports_video' => true,
                 'max_content_length' => 2200,
-                'notes' => 'REQUIRES a video file. Content text becomes video caption.',
+                'notes' => 'REQUIRES a video file. Content becomes video caption.',
             ],
             'pinterest' => [
                 'label' => 'Pinterest',
                 'color' => 'bg-red-700',
                 'requires_media' => true,
-                'media_type' => 'image',
+                'media_type' => null, // image OR video
                 'allows_text_only' => false,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 500,
-                'notes' => 'REQUIRES at least one image. Video pins use a different flow and are not supported yet. A board must be configured on the account.',
+                'notes' => 'REQUIRES image or video. Single media per pin. Board must be configured on the account.',
             ],
             'mastodon' => [
                 'label' => 'Mastodon',
@@ -92,8 +108,10 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 500,
-                'notes' => 'Text-only OK. Most instances limit to 500 characters.',
+                'notes' => 'Text-only OK. Most instances limit to 500 chars.',
             ],
             'telegram' => [
                 'label' => 'Telegram',
@@ -101,6 +119,8 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => 4096,
                 'notes' => 'Text-only OK. Media becomes photo with caption.',
             ],
@@ -110,8 +130,10 @@ class PlatformRequirements
                 'requires_media' => false,
                 'media_type' => null,
                 'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
                 'max_content_length' => null,
-                'notes' => 'Text-only OK. First image (if any) is embedded inline.',
+                'notes' => 'Text-only OK. Images embedded inline; videos and other media become clickable links.',
             ],
         ];
     }
@@ -124,11 +146,6 @@ class PlatformRequirements
     /**
      * Validate a post payload against the requirements of a set of providers.
      * Returns array of errors keyed by provider name. Empty array = valid.
-     *
-     * @param  array  $providers  e.g. ['pinterest', 'linkedin']
-     * @param  string $content
-     * @param  array  $mediaUrls  e.g. ['https://.../foo.jpg']
-     * @return array  ['pinterest' => 'Pinterest requires at least one image...', ...]
      */
     public static function validate(array $providers, string $content, array $mediaUrls): array
     {
@@ -140,31 +157,45 @@ class PlatformRequirements
                 continue;
             }
 
+            // Categorize current media
+            $hasImage = false;
+            $hasVideo = false;
+            foreach ($mediaUrls as $url) {
+                $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+                if (in_array($ext, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'])) {
+                    $hasVideo = true;
+                } elseif (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'])) {
+                    $hasImage = true;
+                }
+            }
+            $hasMedia = !empty($mediaUrls);
+
             // Media requirement
-            if ($req['requires_media'] && empty($mediaUrls)) {
+            if ($req['requires_media'] && !$hasMedia) {
                 $typeLabel = $req['media_type'] ? ucfirst($req['media_type']) : 'Image or video';
                 $errors[$provider] = "{$req['label']} requires at least one {$typeLabel}. Add media or remove this account.";
                 continue;
             }
 
-            // Media type-specific check (e.g. YouTube needs video, Pinterest needs image)
+            // Media type-specific check
             if ($req['requires_media'] && $req['media_type']) {
-                $hasCorrectType = false;
-                foreach ($mediaUrls as $url) {
-                    $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
-                    if ($req['media_type'] === 'video' && in_array($ext, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'])) {
-                        $hasCorrectType = true;
-                        break;
-                    }
-                    if ($req['media_type'] === 'image' && in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'])) {
-                        $hasCorrectType = true;
-                        break;
-                    }
-                }
+                $hasCorrectType = ($req['media_type'] === 'video' && $hasVideo)
+                    || ($req['media_type'] === 'image' && $hasImage);
                 if (!$hasCorrectType) {
                     $errors[$provider] = "{$req['label']} requires at least one {$req['media_type']} file. Current media does not match.";
                     continue;
                 }
+            }
+
+            // Supported type check — warn if user attached media type the platform doesn't support
+            // (e.g. YouTube post with image only)
+            if ($hasMedia && !$req['supports_image'] && $hasImage && !$hasVideo) {
+                $errors[$provider] = "{$req['label']} does not support image-only posts. Add a video file.";
+                continue;
+            }
+            if ($hasMedia && !$req['supports_video'] && $hasVideo && !$hasImage) {
+                $errors[$provider] = "{$req['label']} does not support video posts. Add an image file.";
+                continue;
             }
 
             // Text requirement (only enforced if media is not required)
