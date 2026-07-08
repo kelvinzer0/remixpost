@@ -27,12 +27,9 @@ return [
         'client_id' => env('LINKEDIN_CLIENT_ID'),
         'client_secret' => env('LINKEDIN_CLIENT_SECRET'),
         'redirect' => '/integrations/social/linkedin',
-        // Only use scopes available to all LinkedIn apps.
-        // rw_organization and r_organization_social require Marketing API approval.
-        // To post to Company Pages, user must be admin — the w_member_social scope
-        // allows posting to personal feed. Company Page posting uses the same scope
-        // if the user is an admin of the page.
-        'scopes' => ['openid', 'profile', 'email', 'w_member_social'],
+        // Scopes match Postiz exactly — all enabled in LinkedIn app settings
+        'scopes' => ['openid', 'profile', 'w_member_social', 'r_basicprofile',
+                     'rw_organization_admin', 'w_organization_social', 'r_organization_social'],
     ],
     'youtube' => [
         'client_id' => env('YOUTUBE_CLIENT_ID'),
