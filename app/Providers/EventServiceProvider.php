@@ -12,7 +12,6 @@ class EventServiceProvider extends ServiceProvider
             \SocialiteProviders\YouTube\YouTubeExtendSocialite::class,
             \SocialiteProviders\Pinterest\PinterestExtendSocialite::class,
             \SocialiteProviders\TikTok\TikTokExtendSocialite::class,
-            \SocialiteProviders\Mastodon\MastodonExtendSocialite::class,
         ],
     ];
 }

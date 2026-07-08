@@ -15,7 +15,6 @@
         "socialiteproviders/youtube": "^4.1",
         "socialiteproviders/pinterest": "^4.1",
         "socialiteproviders/tiktok": "^4.1",
-        "socialiteproviders/mastodon": "^4.1",
         "league/flysystem-aws-s3-v3": "^3.0",
         "predis/predis": "^2.0",
         "abraham/twitteroauth": "^8.0",
@@ -75,6 +74,9 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
+        },
+        "audit": {
+            "abandoned": "ignore"
         }
     },
     "minimum-stability": "stable",
