@@ -130,15 +130,14 @@ const manualProviders = providers.filter(p => !p.oauth);
                     <p class="text-xs text-gray-400">Connect a Facebook Page first, then come back here.</p>
                 </div>
                 <div v-else>
-                    <form v-for="fbAccount in accounts.filter(a => a.provider === 'facebook')" :key="fbAccount.id"
-                        method="POST" :action="`/social-accounts/connect-instagram`">
-                        <input type="hidden" name="_token" :value="$page.props.csrf_token || ''" />
-                        <input type="hidden" name="facebook_account_id" :value="fbAccount.id" />
-                        <button type="submit"
-                            class="w-full py-2 text-xs font-medium text-center text-white bg-pink-500 rounded-md hover:bg-pink-600">
-                            Connect Instagram from "{{ fbAccount.name }}"
-                        </button>
-                    </form>
+                    <Link v-for="fbAccount in accounts.filter(a => a.provider === 'facebook')" :key="fbAccount.id"
+                        :href="`/social-accounts/connect-instagram`"
+                        method="post"
+                        :data="{ facebook_account_id: fbAccount.id }"
+                        as="button"
+                        class="w-full py-2 text-xs font-medium text-center text-white bg-pink-500 rounded-md hover:bg-pink-600">
+                        Connect Instagram from "{{ fbAccount.name }}"
+                    </Link>
                 </div>
             </div>
         </div>
