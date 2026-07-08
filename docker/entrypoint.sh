@@ -14,10 +14,10 @@ if [ ! -f .env ]; then
     fi
 fi
 
-# Generate APP_KEY if not set
+# Generate APP_KEY if not set (skip if .env is read-only or already has key)
 if ! grep -q "^APP_KEY=" .env || grep -q "^APP_KEY=$" .env; then
     echo "==> Generating APP_KEY..."
-    php artisan key:generate --force
+    php artisan key:generate --force 2>/dev/null || echo "    WARNING: Could not write APP_KEY to .env (read-only?). Set APP_KEY in .env manually."
 fi
 
 # Ensure storage directories exist with correct permissions
