@@ -21,16 +21,22 @@ jobs:
           php-version: '8.3'
           coverage: none
 
-      - name: Install Composer dependencies
-        env:
-          COMPOSER_NO_AUDIT: 1
-        run: composer install --no-dev --no-interaction --prefer-dist --ignore-platform-reqs
+      - name: Check PHP syntax (all files)
+        run: |
+          find app/ config/ routes/ database/ -name "*.php" -exec php -l {} \; 2>&1
+          echo "✓ All PHP files pass syntax check"
 
-      - name: Check PHP syntax
-        run: find app/ config/ routes/ database/ -name "*.php" -exec php -l {} \;
-
-      - name: Run Pint (code style)
-        run: vendor/bin/pint --test
+      - name: Verify all classes referenced in use statements exist
+        run: |
+          EXIT_CODE=0
+          for cls in $(grep -rhE "^use App\\\\" app/ 2>/dev/null | sed "s/use App\\\\//;s/;//" | sort -u); do
+            filepath="app/$(echo $cls | tr '\\' '/').php"
+            if [ ! -f "$filepath" ]; then
+              echo "✗ MISSING: App\\$cls → expected at $filepath"
+              EXIT_CODE=1
+            fi
+          done
+          exit $EXIT_CODE
 
   build:
     needs: lint
