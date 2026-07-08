@@ -88,6 +88,51 @@ class SocialAccountController extends Controller
             }
 
             // Twitter and LinkedIn: store the account directly
+            // YouTube: SocialiteProviders driver calls YouTube API which can 401
+            // for accounts without a channel. Fall back to Google userinfo.
+            if ($provider === 'youtube') {
+                try {
+                    $socialiteUser = Socialite::driver('youtube')->user();
+                } catch (\Exception $youtubeEx) {
+                    // YouTube API 401 — try getting user from Google userinfo
+                    Log::warning("YouTube API failed, trying Google userinfo: " . $youtubeEx->getMessage());
+
+                    // Get access token manually from Google
+                    $tokenResponse = Http::post('https://oauth2.googleapis.com/token', [
+                        'code' => $request->get('code'),
+                        'client_id' => config('services.youtube.client_id'),
+                        'client_secret' => config('services.youtube.client_secret'),
+                        'redirect_uri' => url('/integrations/social/youtube'),
+                        'grant_type' => 'authorization_code',
+                    ])->json();
+
+                    $accessToken = $tokenResponse['access_token'] ?? null;
+                    if (!$accessToken) {
+                        throw $youtubeEx;
+                    }
+
+                    // Get user info from Google (not YouTube)
+                    $googleUser = Http::withToken($accessToken)
+                        ->get('https://www.googleapis.com/oauth2/v2/userinfo')
+                        ->json();
+
+                    if (!isset($googleUser['id'])) {
+                        throw $youtubeEx;
+                    }
+
+                    // Create a simple object mimicking Socialite User
+                    $socialiteUser = new \Laravel\Socialite\Two\User();
+                    $socialiteUser->id = $googleUser['id'];
+                    $socialiteUser->name = $googleUser['name'] ?? $googleUser['email'] ?? 'YouTube User';
+                    $socialiteUser->email = $googleUser['email'] ?? null;
+                    $socialiteUser->avatar = $googleUser['picture'] ?? null;
+                    $socialiteUser->token = $accessToken;
+                    $socialiteUser->refreshToken = $tokenResponse['refresh_token'] ?? null;
+                    $socialiteUser->expiresIn = $tokenResponse['expires_in'] ?? null;
+
+                    Log::info("YouTube: using Google userinfo fallback for user: " . $googleUser['email']);
+                }
+            }
             $this->createSocialAccount($userId, $provider, $socialiteUser);
 
             return redirect()->route('social-accounts.index')

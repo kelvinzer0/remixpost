@@ -35,7 +35,10 @@ return [
         'client_secret' => env('YOUTUBE_CLIENT_SECRET'),
         'redirect' => '/integrations/social/youtube',
         'scopes' => ['https://www.googleapis.com/auth/youtube.upload',
-                     'https://www.googleapis.com/auth/youtube'],
+                     'https://www.googleapis.com/auth/youtube',
+                     'https://www.googleapis.com/auth/youtube.readonly',
+                     'https://www.googleapis.com/auth/userinfo.profile',
+                     'https://www.googleapis.com/auth/userinfo.email'],
     ],
     'tiktok' => [
         'client_id' => env('TIKTOK_CLIENT_ID'),
