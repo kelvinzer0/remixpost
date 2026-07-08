@@ -35,6 +35,17 @@ const minDate = () => {
     const d = new Date(Date.now() + 5 * 60 * 1000);
     return d.toISOString().slice(0, 16);
 };
+
+// Check if URL is an image (by extension)
+const isImageUrl = (url) => {
+    const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
+    return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
+};
+
+// Check if mime type is image
+const isImageMime = (mime) => {
+    return mime?.startsWith('image/');
+};
 </script>
 
 <template>
@@ -89,7 +100,12 @@ const minDate = () => {
                     <div class="mt-2 flex flex-wrap gap-2">
                         <div v-for="(url, i) in form.media_urls" :key="i"
                             class="relative group">
-                            <img :src="url" class="w-20 h-20 object-cover rounded-md border border-gray-200" />
+                            <img v-if="isImageUrl(url)" :src="url" class="w-20 h-20 object-cover rounded-md border border-gray-200" />
+                            <div v-else class="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
+                                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                            </div>
                             <button type="button" @click="form.media_urls.splice(i, 1)"
                                 class="absolute -top-2 -right-2 w-5 h-5 bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100">
                                 ×
@@ -109,7 +125,13 @@ const minDate = () => {
                                 type="button"
                                 @click="form.media_urls.push(item.url); showMediaPicker = false"
                                 class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
-                                <img :src="item.url" class="w-full h-16 object-cover" />
+                                <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
+                                <div v-else class="w-full h-16 flex items-center justify-center bg-gray-100">
+                                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                </div>
+                                <p class="text-xs text-gray-500 truncate px-1">{{ item.original_name }}</p>
                             </button>
                         </div>
                         <p v-if="!props.media || props.media.length === 0" class="text-xs text-gray-400 text-center py-4">
