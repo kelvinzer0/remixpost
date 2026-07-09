@@ -13,9 +13,14 @@ namespace App\Services;
  *  - requires_media: bool        — at least one media item is mandatory
  *  - media_type: string|null     — 'image' | 'video' | null (any)
  *  - allows_text_only: bool      — true if posting text without media is allowed
- *  - supports_image: bool        — true if image upload is supported (optional or required)
- *  - supports_video: bool        — true if video upload is supported (optional or required)
- *  - max_content_length: int|null — provider-specific character limit (null = no limit)
+ *  - supports_image: bool        — true if image upload is supported
+ *  - supports_video: bool        — true if video upload is supported
+ *  - supports_pdf: bool          — true if PDF document upload is supported
+ *  - supports_tags: bool         — true if hashtags/tags can be sent natively
+ *  - supports_first_comment: bool — true if first comment auto-post is supported
+ *  - max_content_length: int|null — provider-specific character limit
+ *  - max_media_size_mb: int|null — max file size per media item in MB
+ *  - max_media_count: int|null   — max number of media items per post
  *  - label: string               — human-readable name
  *  - color: string               — tailwind bg-* class for avatar/badge
  *  - notes: string               — extra guidance for user
@@ -33,8 +38,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => false,
                 'max_content_length' => 280,
-                'notes' => 'Text-only OK. Max 280 chars for free accounts. Supports up to 4 images or 1 video.',
+                'max_media_size_mb' => 5,
+                'max_media_count' => 4,
+                'notes' => 'Text-only OK. Max 280 chars. Up to 4 images or 1 video. Tags appended to text.',
             ],
             'facebook' => [
                 'label' => 'Facebook',
@@ -44,8 +54,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => true,
                 'max_content_length' => 63206,
-                'notes' => 'Text-only OK. Supports multiple images or single video.',
+                'max_media_size_mb' => 100,
+                'max_media_count' => 10,
+                'notes' => 'Text-only OK. Multiple images or single video. First comment supported.',
             ],
             'linkedin' => [
                 'label' => 'LinkedIn',
@@ -56,19 +71,28 @@ class PlatformRequirements
                 'supports_image' => true,
                 'supports_video' => true,
                 'supports_pdf' => true,
+                'supports_tags' => true,
+                'supports_first_comment' => true,
                 'max_content_length' => 3000,
-                'notes' => 'Text-only OK. Supports multiple images OR single video OR single PDF (carousel, 1:1 pages, max 300 pages, max 100MB) per post.',
+                'max_media_size_mb' => 100,
+                'max_media_count' => 9,
+                'notes' => 'Text-only OK. Images OR video OR PDF (carousel, 1:1, max 300 pages). Tags + first comment supported.',
             ],
             'instagram' => [
                 'label' => 'Instagram',
                 'color' => 'bg-pink-500',
                 'requires_media' => true,
-                'media_type' => null, // image OR video
+                'media_type' => null,
                 'allows_text_only' => false,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => true,
                 'max_content_length' => 2200,
-                'notes' => 'REQUIRES image or video. Text-only not supported by Instagram API.',
+                'max_media_size_mb' => 100,
+                'max_media_count' => 10,
+                'notes' => 'REQUIRES media. Tags appended to caption. First comment supported (great for hashtags).',
             ],
             'youtube' => [
                 'label' => 'YouTube',
@@ -78,8 +102,13 @@ class PlatformRequirements
                 'allows_text_only' => false,
                 'supports_image' => false,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => true,
                 'max_content_length' => 5000,
-                'notes' => 'REQUIRES a video file. Content becomes video description.',
+                'max_media_size_mb' => 256,
+                'max_media_count' => 1,
+                'notes' => 'REQUIRES video. Tags sent as video tags. Content becomes description.',
             ],
             'tiktok' => [
                 'label' => 'TikTok',
@@ -89,19 +118,29 @@ class PlatformRequirements
                 'allows_text_only' => false,
                 'supports_image' => false,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => false,
                 'max_content_length' => 2200,
-                'notes' => 'REQUIRES a video file. Content becomes video caption.',
+                'max_media_size_mb' => 287,
+                'max_media_count' => 1,
+                'notes' => 'REQUIRES video. Tags appended to caption.',
             ],
             'pinterest' => [
                 'label' => 'Pinterest',
                 'color' => 'bg-red-700',
                 'requires_media' => true,
-                'media_type' => null, // image OR video
+                'media_type' => null,
                 'allows_text_only' => false,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => false,
+                'supports_first_comment' => false,
                 'max_content_length' => 500,
-                'notes' => 'REQUIRES image or video. Single media per pin. Board must be configured on the account.',
+                'max_media_size_mb' => 100,
+                'max_media_count' => 1,
+                'notes' => 'REQUIRES image or video. Single media per pin. Board configured on account.',
             ],
             'mastodon' => [
                 'label' => 'Mastodon',
@@ -111,8 +150,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => false,
                 'max_content_length' => 500,
-                'notes' => 'Text-only OK. Most instances limit to 500 chars.',
+                'max_media_size_mb' => 40,
+                'max_media_count' => 4,
+                'notes' => 'Text-only OK. Tags as #hashtags in text. Max 500 chars.',
             ],
             'telegram' => [
                 'label' => 'Telegram',
@@ -122,8 +166,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => false,
                 'max_content_length' => 4096,
-                'notes' => 'Text-only OK. Media becomes photo with caption.',
+                'max_media_size_mb' => 50,
+                'max_media_count' => 10,
+                'notes' => 'Text-only OK. Tags as #hashtags in text. Media via upload (max 50MB) or URL (max 5MB for images).',
             ],
             'email' => [
                 'label' => 'Email',
@@ -133,8 +182,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => true,
+                'supports_tags' => false,
+                'supports_first_comment' => false,
                 'max_content_length' => null,
-                'notes' => 'Text-only OK. Images embedded inline; videos and other media become clickable links.',
+                'max_media_size_mb' => null,
+                'max_media_count' => null,
+                'notes' => 'Text-only OK. Images inline; videos/PDFs as clickable links.',
             ],
             'discord' => [
                 'label' => 'Discord',
@@ -144,8 +198,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => false,
+                'supports_tags' => false,
+                'supports_first_comment' => false,
                 'max_content_length' => 2000,
-                'notes' => 'Text-only OK. Posts via webhook. Max 2000 chars per message. Supports up to 10 attachments (images + videos).',
+                'max_media_size_mb' => 25,
+                'max_media_count' => 10,
+                'notes' => 'Text-only OK. Posts via webhook. Max 2000 chars. Up to 10 attachments (25MB each).',
             ],
             'buffer' => [
                 'label' => 'Buffer',
@@ -155,8 +214,13 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
-                'max_content_length' => null, // Buffer routes to underlying platform, content limits vary
-                'notes' => 'Aggregator — routes post to Buffer channel (FB/IG/X/Pinterest/LinkedIn/TikTok/etc). Text-only OK. Media must be public HTTPS URL.',
+                'supports_pdf' => false,
+                'supports_tags' => true,
+                'supports_first_comment' => true,
+                'max_content_length' => null,
+                'max_media_size_mb' => null, // Buffer routes to underlying platform
+                'max_media_count' => 10,
+                'notes' => 'Aggregator — routes to Buffer channel. Tags + first comment sent via Buffer metadata. Media must be public HTTPS URL.',
             ],
         ];
     }

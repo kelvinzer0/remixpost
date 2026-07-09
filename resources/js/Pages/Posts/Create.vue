@@ -14,6 +14,10 @@ const platformRequirements = computed(() => page.props.platformRequirements || {
 const form = useForm({
     content: '',
     media_urls: [],
+    tags: [],
+    tagInput: '',
+    first_comment: '',
+    alt_text: '',
     account_ids: [],
     scheduled_at: '',
 });
@@ -102,6 +106,41 @@ const openAIModal = () => {
     aiCaptions.value = [];
     aiError.value = '';
 };
+
+// ===== Tags =====
+const addTag = () => {
+    const tag = form.tagInput.trim().replace(/^#/, '');
+    if (tag && !form.tags.includes(tag) && form.tags.length < 30) {
+        form.tags.push(tag);
+    }
+    form.tagInput = '';
+};
+
+const removeTag = (index) => {
+    form.tags.splice(index, 1);
+};
+
+const addTagOnEnter = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        addTag();
+    }
+};
+
+// Check if any selected provider supports first comment
+const supportsFirstComment = computed(() => {
+    return selectedProviders.value.some(p => {
+        const req = getReq(p);
+        return req.supports_first_comment;
+    });
+});
+
+const supportsTags = computed(() => {
+    return selectedProviders.value.some(p => {
+        const req = getReq(p);
+        return req.supports_tags;
+    });
+});
 
 const showMediaPicker = ref(false);
 
@@ -232,7 +271,10 @@ const canSubmit = computed(() =>
 
 const submit = () => {
     if (!canSubmit.value) return;
-    form.post('/posts', {
+    // Remove tagInput before submit (it's a UI helper field, not a form field)
+    const data = form.data();
+    delete data.tagInput;
+    form.transform(() => data).post('/posts', {
         onSuccess: () => form.reset(),
     });
 };
@@ -413,6 +455,39 @@ const minDate = () => {
                         </p>
                     </div>
                     <p class="mt-1 text-xs text-gray-500">Upload media in the <Link href="/media" class="text-brand-600">Media Manager</Link>, then select here.</p>
+                </div>
+
+                <!-- Tags -->
+                <div v-if="supportsTags">
+                    <label class="block text-sm font-medium text-gray-700">
+                        Tags / Hashtags
+                        <span class="ml-1 text-xs font-normal text-gray-500">(untuk platform yang support)</span>
+                    </label>
+                    <div class="mt-1 flex flex-wrap gap-1.5 mb-2">
+                        <span v-for="(tag, i) in form.tags" :key="i"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-brand-100 text-brand-800 rounded-full">
+                            #{{ tag }}
+                            <button type="button" @click="removeTag(i)"
+                                class="text-brand-600 hover:text-brand-900">×</button>
+                        </span>
+                    </div>
+                    <input v-model="form.tagInput" type="text"
+                        @keydown="addTagOnEnter"
+                        placeholder="Ketik tag lalu Enter (mis. promosi, viral, diskon)"
+                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+                    <p class="mt-1 text-xs text-gray-500">Tekan Enter atau koma untuk tambah tag. Max 30 tag.</p>
+                </div>
+
+                <!-- First Comment -->
+                <div v-if="supportsFirstComment">
+                    <label class="block text-sm font-medium text-gray-700">
+                        First Comment
+                        <span class="ml-1 text-xs font-normal text-gray-500">(auto-post sebagai komentar pertama di FB/IG/LinkedIn/YouTube)</span>
+                    </label>
+                    <textarea v-model="form.first_comment" rows="2"
+                        placeholder="Opsional — mis. hashtag tambahan atau CTA"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm"></textarea>
+                    <p class="mt-1 text-xs text-gray-500">Posting utama → tunggu 5 detik → komentar ini auto-post. Cocok untuk hashtag IG atau link di komentar FB.</p>
                 </div>
 
                 <!-- Schedule -->

@@ -20,6 +20,9 @@ class Post extends Model
         'user_id',
         'content',
         'media_urls',
+        'tags',
+        'first_comment',
+        'alt_text',
         'scheduled_at',
         'published_at',
         'status',
@@ -30,6 +33,7 @@ class Post extends Model
     {
         return [
             'media_urls' => 'array',
+            'tags' => 'array',
             'scheduled_at' => 'datetime',
             'published_at' => 'datetime',
         ];

@@ -51,6 +51,9 @@ class PublishPostJob implements ShouldQueue
             $result = $publisher->publish([
                 'content' => $post->content,
                 'media_urls' => $post->media_urls ?? [],
+                'tags' => $post->tags ?? [],
+                'first_comment' => $post->first_comment,
+                'alt_text' => $post->alt_text,
                 'scheduled_at' => $post->scheduled_at,
             ], [
                 'id' => $account->id,

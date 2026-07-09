@@ -53,6 +53,9 @@ class BufferPublisher implements PublisherInterface
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
             $scheduledAt = $post['scheduled_at'] ?? null;
+            $tags = $post['tags'] ?? [];
+            $firstComment = $post['first_comment'] ?? null;
+            $altText = $post['alt_text'] ?? null;
 
             // Refresh access token if needed (Buffer tokens last 1 hour)
             $accessToken = $this->ensureFreshAccessToken($account);
@@ -97,6 +100,10 @@ class BufferPublisher implements PublisherInterface
             // Build assets array from media URLs
             $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
 
+            // Build per-channel metadata (tags, first comment, Pinterest board, IG post type, etc.)
+            $channelService = $metadata['channel_service'] ?? 'unknown';
+            $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata);
+
             // Build mutation input — note: GraphQL input fields use camelCase
             $inputLines = [
                 'text: ' . json_encode($content),
@@ -109,6 +116,9 @@ class BufferPublisher implements PublisherInterface
             }
             if (!empty($assetsGraphQL)) {
                 $inputLines[] = 'assets: [' . implode(', ', $assetsGraphQL) . ']';
+            }
+            if ($metadataGraphQL) {
+                $inputLines[] = 'metadata: { ' . $metadataGraphQL . ' }';
             }
 
             $mutation = 'mutation {
@@ -189,6 +199,45 @@ class BufferPublisher implements PublisherInterface
      * stay reachable until post publish time (which for scheduled posts can
      * be hours or days later).
      */
+    /**
+     * Build per-channel metadata GraphQL input.
+     *
+     * Buffer supports per-service metadata for:
+     *   - Pinterest: boardServiceId (required for pins)
+     *   - Instagram: postType (post, reel, story)
+     *   - Twitter/Threads/Mastodon/Bluesky: thread replies
+     *   - Facebook/LinkedIn/Instagram: firstComment
+     *
+     * @return string GraphQL fragment (without outer braces), or empty string
+     */
+    private function buildMetadataGraphQL(string $channelService, array $tags, ?string $firstComment, array $accountMetadata): string
+    {
+        $parts = [];
+
+        // First comment — supported by FB, IG, LinkedIn
+        if ($firstComment && in_array($channelService, ['facebook', 'instagram', 'linkedin'])) {
+            $parts[] = "{$channelService}: { firstComment: " . json_encode($firstComment) . " }";
+        }
+
+        // Pinterest board — required for Pinterest posts via Buffer
+        if ($channelService === 'pinterest' && !empty($accountMetadata['pinterest_board_id'])) {
+            $parts[] = "pinterest: { boardServiceId: " . json_encode($accountMetadata['pinterest_board_id']) . " }";
+        }
+
+        // Instagram post type (post/reel/story) — from channel metadata
+        if ($channelService === 'instagram' && !empty($accountMetadata['instagram_post_type'])) {
+            $postType = $accountMetadata['instagram_post_type'];
+            $parts[] = "instagram: { postType: {$postType }" . (!empty($firstComment) ? ", firstComment: " . json_encode($firstComment) : '') . " }";
+        }
+
+        // Twitter threads — if firstComment provided, treat as thread reply
+        if ($firstComment && $channelService === 'twitter') {
+            $parts[] = "twitter: { thread: [{ text: " . json_encode($firstComment) . " }] }";
+        }
+
+        return implode(', ', $parts);
+    }
+
     private function buildAssetsGraphQL(array $mediaUrls): array
     {
         $assets = [];

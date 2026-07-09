@@ -52,14 +52,18 @@ class PostController extends Controller
     {
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:5000'],
-            'media_urls' => ['nullable', 'array', 'max:4'],
+            'media_urls' => ['nullable', 'array', 'max:10'],
             'media_urls.*' => ['url'],
+            'tags' => ['nullable', 'array', 'max:30'],
+            'tags.*' => ['string', 'max:100'],
+            'first_comment' => ['nullable', 'string', 'max:8000'],
+            'alt_text' => ['nullable', 'string', 'max:1000'],
             'account_ids' => ['required', 'array', 'min:1'],
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
         ]);
 
-        // Per-platform requirement check (defensive — frontend already prevents submit)
+        // Per-platform requirement check
         $providers = $request->user()
             ->socialAccounts()
             ->whereIn('id', $validated['account_ids'])
@@ -86,6 +90,9 @@ class PostController extends Controller
         $post = $request->user()->posts()->create([
             'content' => $validated['content'],
             'media_urls' => $validated['media_urls'] ?? [],
+            'tags' => $validated['tags'] ?? [],
+            'first_comment' => $validated['first_comment'] ?? null,
+            'alt_text' => $validated['alt_text'] ?? null,
             'scheduled_at' => $scheduledAt,
             'status' => Post::STATUS_SCHEDULED,
         ]);
@@ -147,14 +154,18 @@ class PostController extends Controller
 
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:5000'],
-            'media_urls' => ['nullable', 'array', 'max:4'],
+            'media_urls' => ['nullable', 'array', 'max:10'],
             'media_urls.*' => ['url'],
+            'tags' => ['nullable', 'array', 'max:30'],
+            'tags.*' => ['string', 'max:100'],
+            'first_comment' => ['nullable', 'string', 'max:8000'],
+            'alt_text' => ['nullable', 'string', 'max:1000'],
             'account_ids' => ['required', 'array', 'min:1'],
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
         ]);
 
-        // Per-platform requirement check (defensive — frontend already prevents submit)
+        // Per-platform requirement check
         $providers = $request->user()
             ->socialAccounts()
             ->whereIn('id', $validated['account_ids'])
@@ -177,6 +188,9 @@ class PostController extends Controller
         $post->update([
             'content' => $validated['content'],
             'media_urls' => $validated['media_urls'] ?? [],
+            'tags' => $validated['tags'] ?? [],
+            'first_comment' => $validated['first_comment'] ?? null,
+            'alt_text' => $validated['alt_text'] ?? null,
             'scheduled_at' => \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone')),
             'status' => Post::STATUS_SCHEDULED,
             'failure_reason' => null,
