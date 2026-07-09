@@ -80,7 +80,13 @@ return [
         // Buffer uses OAuth 2.0 + PKCE (mandatory). No client_secret needed
         // because the app is registered as a "public client" in Buffer's
         // client management UI. PKCE code_challenge replaces the secret.
-        'redirect' => '/integrations/social/buffer',
+        //
+        // The redirect path is configurable because Buffer requires the
+        // redirect_uri sent in OAuth requests to MATCH the URL registered
+        // in their client app exactly. Users may have registered either:
+        //   - /integrations/social/buffer (Postiz-compatible, recommended)
+        //   - /social-accounts/callback/buffer (legacy URL, also accepted by our routes)
+        'redirect' => env('BUFFER_REDIRECT_PATH', '/integrations/social/buffer'),
         // All scopes — Buffer rotates refresh tokens, so we need offline_access.
         'scopes' => ['posts:write', 'posts:read', 'ideas:read', 'ideas:write',
                      'account:read', 'account:write', 'offline_access'],

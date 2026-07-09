@@ -319,7 +319,9 @@ const manualProviders = providers.filter(p => !p.oauth);
                         <p class="mb-1">Bypass strict app review for Meta (FB/IG), Pinterest, X, and TikTok. Buffer already has approved apps — connect once, publish to all.</p>
                         <p class="font-medium mt-2 mb-1">Setup:</p>
                         <ol class="list-decimal ml-4 space-y-0.5">
-                            <li>Register client at <a href="https://buffer.com/clients/manage" target="_blank" class="underline">buffer.com/clients</a> (Public client + PKCE)</li>
+                            <li>Register client at <a href="https://buffer.com/clients/manage" target="_blank" class="underline">buffer.com/clients</a> (Public client + PKCE, no secret)</li>
+                            <li>Permissions: check all (account:read, account:write, posts:read, posts:write, ideas:read, ideas:write)</li>
+                            <li>Redirect URL: <code class="px-0.5 bg-blue-100 rounded">/integrations/social/buffer</code> or <code class="px-0.5 bg-blue-100 rounded">/social-accounts/callback/buffer</code> (both work — pick one and set <code class="px-0.5 bg-blue-100 rounded">BUFFER_REDIRECT_PATH</code> in .env to match)</li>
                             <li>Set <code class="px-0.5 bg-blue-100 rounded">BUFFER_CLIENT_ID</code> in .env</li>
                             <li>Click button below → pick channels</li>
                         </ol>

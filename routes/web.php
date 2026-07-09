@@ -40,7 +40,11 @@ Route::middleware('auth')->group(function () {
 
     // Buffer — OAuth 2.0 + PKCE flow (aggregator for FB/IG/X/Pinterest/LinkedIn/TikTok/etc).
     // Same critical ordering rule as Mastodon: register BEFORE the {provider} wildcard.
+    // Both callback URLs are accepted (user may have registered either in Buffer app):
+    //   - /integrations/social/buffer (Postiz-compatible)
+    //   - /social-accounts/callback/buffer (legacy URL)
     Route::get('/integrations/social/buffer', [SocialAccountController::class, 'handleBufferCallback'])->name('social-accounts.buffer-callback');
+    Route::get('/social-accounts/callback/buffer', [SocialAccountController::class, 'handleBufferCallback']);
     Route::post('/integrations/social/connect-buffer', [SocialAccountController::class, 'connectBuffer'])->name('social-accounts.connect-buffer');
     Route::post('/integrations/social/select-buffer-organization', [SocialAccountController::class, 'selectBufferOrganization'])->name('social-accounts.select-buffer-organization');
     Route::post('/integrations/social/select-buffer-channel', [SocialAccountController::class, 'selectBufferChannel'])->name('social-accounts.select-buffer-channel');
