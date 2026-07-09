@@ -150,45 +150,69 @@ class AnalyticsController extends Controller
     public function refresh(Request $request)
     {
         $user = $request->user();
-        $posts = $user->posts()
-            ->where('status', Post::STATUS_PUBLISHED)
-            ->with('socialAccounts')
+        // Query pivot directly to get external_post_id (eager loading doesn't
+        // include pivot extra columns by default)
+        $rows = \DB::table('post_social_account')
+            ->join('posts', 'posts.id', '=', 'post_social_account.post_id')
+            ->join('social_accounts', 'social_accounts.id', '=', 'post_social_account.social_account_id')
+            ->where('posts.user_id', $user->id)
+            ->where('posts.status', Post::STATUS_PUBLISHED)
+            ->whereNotNull('post_social_account.external_post_id')
+            ->select(
+                'post_social_account.post_id',
+                'post_social_account.social_account_id',
+                'post_social_account.external_post_id',
+                'social_accounts.provider',
+                'social_accounts.access_token',
+                'social_accounts.refresh_token',
+                'social_accounts.expires_at',
+                'social_accounts.metadata',
+                'social_accounts.user_id'
+            )
             ->get();
 
         $updated = 0;
         $errors = [];
 
-        foreach ($posts as $post) {
-            foreach ($post->socialAccounts as $account) {
-                $pivot = $post->socialAccounts()
-                    ->where('social_accounts.id', $account->id)
-                    ->first()?->pivot;
-
-                if (!$pivot || !$pivot->external_post_id) {
-                    continue;
-                }
-
-                $externalId = $pivot->external_post_id;
-
-                try {
-                    $metrics = $this->fetchMetricsForAccount($account, $externalId);
-
-                    if ($metrics) {
-                        PostMetric::updateOrCreate(
-                            [
-                                'post_id' => $post->id,
-                                'social_account_id' => $account->id,
-                            ],
-                            array_merge($metrics, [
-                                'external_post_id' => $externalId,
-                                'fetched_at' => now(),
-                            ])
-                        );
-                        $updated++;
+        foreach ($rows as $row) {
+            try {
+                // For Buffer: refresh token if expired
+                $accessToken = $row->access_token;
+                if ($row->provider === 'buffer') {
+                    $expiresAt = $row->expires_at ? \Carbon\Carbon::parse($row->expires_at) : null;
+                    if ($expiresAt && $expiresAt->isPast() && $row->refresh_token) {
+                        $refreshResult = $this->refreshBufferToken($row->social_account_id, $row->refresh_token, $row->user_id);
+                        if ($refreshResult) {
+                            $accessToken = $refreshResult;
+                        } else {
+                            $errors[] = "Post #{$row->post_id} (buffer): Token refresh failed";
+                            continue;
+                        }
                     }
-                } catch (\Exception $e) {
-                    $errors[] = "Post #{$post->id} ({$account->provider}): " . $e->getMessage();
                 }
+
+                $metrics = $this->fetchMetricsForProvider(
+                    $row->provider,
+                    $accessToken,
+                    $row->external_post_id,
+                    is_string($row->metadata) ? json_decode($row->metadata, true) : ($row->metadata ?? [])
+                );
+
+                if ($metrics) {
+                    PostMetric::updateOrCreate(
+                        [
+                            'post_id' => $row->post_id,
+                            'social_account_id' => $row->social_account_id,
+                        ],
+                        array_merge($metrics, [
+                            'external_post_id' => $row->external_post_id,
+                            'fetched_at' => now(),
+                        ])
+                    );
+                    $updated++;
+                }
+            } catch (\Exception $e) {
+                $errors[] = "Post #{$row->post_id} ({$row->provider}): " . $e->getMessage();
             }
         }
 
@@ -201,28 +225,65 @@ class AnalyticsController extends Controller
     }
 
     /**
+     * Refresh Buffer access token (tokens expire in 1 hour).
+     */
+    private function refreshBufferToken(int $accountId, string $refreshToken, int $userId): ?string
+    {
+        try {
+            $response = Http::asForm()->post(config('services.buffer.token_url'), [
+                'client_id' => config('services.buffer.client_id'),
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $refreshToken,
+            ]);
+
+            if (!$response->ok()) return null;
+
+            $data = $response->json();
+            $newAccessToken = $data['access_token'] ?? null;
+            $newRefreshToken = $data['refresh_token'] ?? null;
+            $expiresIn = $data['expires_in'] ?? 3600;
+
+            if (!$newAccessToken || !$newRefreshToken) return null;
+
+            // Update ALL Buffer accounts for this user (tokens are user-wide)
+            SocialAccount::where('user_id', $userId)
+                ->where('provider', 'buffer')
+                ->update([
+                    'access_token' => $newAccessToken,
+                    'refresh_token' => $newRefreshToken,
+                    'expires_at' => now()->addSeconds($expiresIn),
+                ]);
+
+            return $newAccessToken;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
      * Fetch metrics from specific platform API.
      */
-    private function fetchMetricsForAccount(SocialAccount $account, string $externalId): ?array
+    private function fetchMetricsForProvider(string $provider, string $accessToken, string $externalId, array $metadata = []): ?array
     {
-        $provider = $account->provider;
-        $accessToken = $account->access_token;
-        $metadata = is_string($account->metadata) ? json_decode($account->metadata, true) : ($account->metadata ?? []);
-
         return match ($provider) {
             'linkedin' => $this->fetchLinkedInMetrics($accessToken, $externalId),
             'facebook' => $this->fetchFacebookMetrics($accessToken, $externalId),
             'youtube' => $this->fetchYouTubeMetrics($accessToken, $externalId),
             'buffer' => $this->fetchBufferMetrics($accessToken, $externalId, $metadata),
-            'telegram' => $this->fetchTelegramMetrics($accessToken, $externalId, $account->provider_id),
-            default => null, // Platforms without analytics API
+            default => null,
         };
     }
 
     private function fetchLinkedInMetrics(string $accessToken, string $postUrn): ?array
     {
         try {
+            // LinkedIn returns share URN (urn:li:share:xxx) from REST Posts API.
+            // To get socialActions, we need to convert to activity URN or use
+            // the share URN directly with the socialActions endpoint.
+            // Try the share URN first, then fallback to different endpoints.
             $encodedUrn = urlencode($postUrn);
+
+            // Try /rest/posts/{urn}/socialActions
             $response = Http::withToken($accessToken)
                 ->withHeaders([
                     'X-Restli-Protocol-Version' => '2.0.0',
@@ -230,7 +291,12 @@ class AnalyticsController extends Controller
                 ])
                 ->get("https://api.linkedin.com/rest/posts/{$encodedUrn}/socialActions");
 
-            if (!$response->ok()) return null;
+            if (!$response->ok()) {
+                // Fallback: try v2/socialActions/{urn}
+                $response = Http::withToken($accessToken)
+                    ->get("https://api.linkedin.com/v2/socialActions/{$encodedUrn}");
+                if (!$response->ok()) return null;
+            }
 
             $data = $response->json();
             return [
