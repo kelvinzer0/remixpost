@@ -45,10 +45,12 @@ const generateAICaption = async () => {
     try {
         const response = await fetch('/ai/caption', {
             method: 'POST',
+            credentials: 'same-origin',  // ensure session cookie sent
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
                 'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
             },
             body: JSON.stringify({
                 prompt: form.content,
@@ -59,15 +61,32 @@ const generateAICaption = async () => {
             }),
         });
 
+        if (!response.ok) {
+            // Handle non-2xx responses (CSRF 419, auth 401, server 500, etc.)
+            const text = await response.text();
+            let errMsg = `HTTP ${response.status}`;
+            try {
+                const errJson = JSON.parse(text);
+                errMsg = errJson.message || errJson.error || errMsg;
+            } catch (_) {
+                errMsg = text.substring(0, 200) || errMsg;
+            }
+            aiError.value = `Gagal (${response.status}): ${errMsg}`;
+            return;
+        }
+
         const data = await response.json();
         if (data.error) {
             aiError.value = data.error;
+        } else if (!data.captions || data.captions.length === 0) {
+            aiError.value = 'AI tidak menghasilkan caption. Coba lagi atau ubah tone.';
         } else {
-            aiCaptions.value = data.captions || [];
+            aiCaptions.value = data.captions;
             aiContextPreview.value = data.context_used || '';
         }
     } catch (e) {
         aiError.value = 'Gagal memanggil AI: ' + e.message;
+        console.error('AI caption fetch error:', e);
     } finally {
         aiGenerating.value = false;
     }

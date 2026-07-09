@@ -107,21 +107,47 @@ class AICaptionService
                     ],
                     'temperature' => 0.8, // creative but not too random
                     'max_tokens' => 1500,
+                    // CRITICAL: explicit stream: false
+                    // Router9 (and some OpenAI-compatible endpoints) default to
+                    // streaming SSE responses, which PHP Http::post() cannot parse
+                    // as JSON. Forcing stream:false ensures we get a single JSON
+                    // response with all tokens at once.
+                    'stream' => false,
                 ]);
 
             if (!$response->ok()) {
                 Log::error('AI caption API error', [
                     'status' => $response->status(),
-                    'body' => $response->body(),
+                    'body' => substr($response->body(), 0, 500),
                 ]);
                 return [
-                    'error' => 'AI API returned error: ' . $response->status() . ' ' . $response->body(),
+                    'error' => 'AI API returned error: ' . $response->status() . ' ' . substr($response->body(), 0, 300),
                     'captions' => [],
                 ];
             }
 
             $data = $response->json();
+            // Debug: log what we got from AI
+            Log::info('AI caption response', [
+                'has_choices' => isset($data['choices']),
+                'has_content' => isset($data['choices'][0]['message']['content']),
+                'model_used' => $data['model'] ?? 'unknown',
+                'content_preview' => isset($data['choices'][0]['message']['content'])
+                    ? substr($data['choices'][0]['message']['content'], 0, 100)
+                    : 'null',
+                'response_keys' => array_keys($data),
+            ]);
+
             $content = $data['choices'][0]['message']['content'] ?? '';
+
+            if (empty($content)) {
+                Log::error('AI returned empty content', ['full_response' => $data]);
+                return [
+                    'error' => 'AI returned empty response. Check OPENAI_MODEL or API key.',
+                    'captions' => [],
+                    'debug' => $data,
+                ];
+            }
 
             // Parse captions — AI should return one per "===" separator
             $captions = $this->parseCaptions($content, $count);
