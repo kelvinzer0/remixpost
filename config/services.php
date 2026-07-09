@@ -94,4 +94,12 @@ return [
         'auth_url' => 'https://auth.buffer.com/auth',
         'token_url' => 'https://auth.buffer.com/token',
     ],
+    'openai' => [
+        // OpenAI-compatible API endpoint. We use router9 (warunglakku) by default
+        // but any OpenAI-compatible endpoint works (OpenAI, Azure OpenAI, Ollama,
+        // LM Studio, etc).
+        'key' => env('OPENAI_API_KEY'),
+        'base_url' => env('OPENAI_API_BASE_URL'),
+        'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+    ],
 ];

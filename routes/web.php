@@ -73,4 +73,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/media/{id}', [\App\Http\Controllers\MediaController::class, 'destroy'])->name('media.destroy');
 
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
+
+    // AI Caption Generator
+    Route::post('/ai/caption', [\App\Http\Controllers\AICaptionController::class, 'generate'])->name('ai.caption.generate');
+    Route::get('/ai/tones', [\App\Http\Controllers\AICaptionController::class, 'tones'])->name('ai.tones');
 });

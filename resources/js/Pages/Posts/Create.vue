@@ -18,6 +18,72 @@ const form = useForm({
     scheduled_at: '',
 });
 
+// ===== AI Caption Generator =====
+const showAIModal = ref(false);
+const aiGenerating = ref(false);
+const aiError = ref('');
+const aiCaptions = ref([]);
+const aiTone = ref('casual');
+const aiCount = ref(3);
+const aiContextPreview = ref('');
+
+const tones = [
+    { value: 'casual', label: '😊 Santai (Casual)' },
+    { value: 'professional', label: '💼 Profesional' },
+    { value: 'promotional', label: '📣 Promosi (Sales)' },
+    { value: 'storytelling', label: '📖 Bercerita (Story)' },
+    { value: 'humorous', label: '😄 Lucu (Humor)' },
+    { value: 'inspirational', label: '✨ Inspiratif' },
+    { value: 'informative', label: '📚 Informatif' },
+];
+
+const generateAICaption = async () => {
+    aiGenerating.value = true;
+    aiError.value = '';
+    aiCaptions.value = [];
+
+    try {
+        const response = await fetch('/ai/caption', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({
+                prompt: form.content,
+                tone: aiTone.value,
+                platforms: selectedProviders.value,
+                target_date: form.scheduled_at || null,
+                count: aiCount.value,
+            }),
+        });
+
+        const data = await response.json();
+        if (data.error) {
+            aiError.value = data.error;
+        } else {
+            aiCaptions.value = data.captions || [];
+            aiContextPreview.value = data.context_used || '';
+        }
+    } catch (e) {
+        aiError.value = 'Gagal memanggil AI: ' + e.message;
+    } finally {
+        aiGenerating.value = false;
+    }
+};
+
+const applyCaption = (caption) => {
+    form.content = caption;
+    showAIModal.value = false;
+};
+
+const openAIModal = () => {
+    showAIModal.value = true;
+    aiCaptions.value = [];
+    aiError.value = '';
+};
+
 const showMediaPicker = ref(false);
 
 // Provider meta fallback (in case platformRequirements is not loaded)
@@ -167,7 +233,14 @@ const minDate = () => {
             <form @submit.prevent="submit" class="space-y-6 bg-white p-6 rounded-lg shadow">
                 <!-- Content -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700">Content</label>
+                    <div class="flex items-center justify-between">
+                        <label class="block text-sm font-medium text-gray-700">Content</label>
+                        <button type="button" @click="openAIModal"
+                            class="text-xs font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 px-2.5 py-1 rounded-md hover:from-purple-700 hover:to-indigo-700 inline-flex items-center gap-1">
+                            <span>✨</span>
+                            <span>Generate dengan AI</span>
+                        </button>
+                    </div>
                     <textarea v-model="form.content" rows="6" required
                         placeholder="What do you want to share?"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500"></textarea>
@@ -357,6 +430,95 @@ const minDate = () => {
                     </button>
                 </div>
             </form>
+        </div>
+
+        <!-- AI Caption Modal -->
+        <div v-if="showAIModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            @click.self="showAIModal = false">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <!-- Modal header -->
+                <div class="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+                    <h3 class="text-base font-semibold text-gray-900 flex items-center gap-2">
+                        <span>✨</span> AI Caption Generator
+                    </h3>
+                    <button @click="showAIModal = false" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="p-4 space-y-4">
+                    <!-- Info banner -->
+                    <div class="p-3 bg-purple-50 border border-purple-200 rounded-md">
+                        <p class="text-xs text-purple-800">
+                            📅 AI akan mempertimbangkan konteks waktu: hari ini, kemarin, besok/lusa,
+                            hari besar, dan suasana hari. Caption akan dibuat dengan "cara orang berfikir"
+                            — natural dan relate ke momen.
+                        </p>
+                    </div>
+
+                    <!-- Tone selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tone / Gaya</label>
+                        <select v-model="aiTone"
+                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 text-sm">
+                            <option v-for="t in tones" :key="t.value" :value="t.value">{{ t.label }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Count selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Jumlah Variasi</label>
+                        <select v-model.number="aiCount"
+                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 text-sm">
+                            <option :value="1">1 caption</option>
+                            <option :value="2">2 caption</option>
+                            <option :value="3">3 caption (default)</option>
+                            <option :value="5">5 caption</option>
+                        </select>
+                    </div>
+
+                    <!-- Generate button -->
+                    <button type="button" @click="generateAICaption" :disabled="aiGenerating"
+                        class="w-full py-2.5 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-md hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-2">
+                        <svg v-if="aiGenerating" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        {{ aiGenerating ? 'Sedang berfikir...' : '✨ Generate Caption' }}
+                    </button>
+
+                    <!-- Error -->
+                    <div v-if="aiError" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-sm text-red-700">{{ aiError }}</p>
+                    </div>
+
+                    <!-- Results -->
+                    <div v-if="aiCaptions.length > 0" class="space-y-3">
+                        <p class="text-xs text-gray-500 font-medium">Pilih caption yang paling cocok:</p>
+                        <div v-for="(caption, i) in aiCaptions" :key="i"
+                            class="p-3 bg-gray-50 border border-gray-200 rounded-md hover:border-purple-300 transition">
+                            <p class="text-sm text-gray-800 whitespace-pre-wrap">{{ caption }}</p>
+                            <div class="mt-2 flex items-center justify-between">
+                                <span class="text-xs text-gray-400">{{ caption.length }} karakter</span>
+                                <button type="button" @click="applyCaption(caption)"
+                                    class="text-xs font-medium text-white bg-purple-600 px-3 py-1 rounded hover:bg-purple-700">
+                                    Pakai Caption Ini
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Context preview (collapsible) -->
+                    <details v-if="aiContextPreview" class="mt-3">
+                        <summary class="cursor-pointer text-xs text-gray-500 hover:text-gray-700">
+                            📋 Lihat konteks yang dipakai AI
+                        </summary>
+                        <pre class="mt-2 p-3 bg-gray-50 border border-gray-200 rounded text-[10px] text-gray-600 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ aiContextPreview }}</pre>
+                    </details>
+                </div>
+            </div>
         </div>
     </AppLayout>
 </template>
