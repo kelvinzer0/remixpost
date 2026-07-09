@@ -107,16 +107,34 @@ class PublishPostJob implements ShouldQueue
     {
         $post->refresh();
         $totalAccounts = $post->socialAccounts()->count();
+
+        // An account is considered "done" if it has either:
+        //   - published_at set (success — including partial success with [INFO]/[WARNING] notes)
+        //   - failure_reason set AND published_at is null (real failure)
+        //
+        // IMPORTANT: We must EXCLUDE rows where failure_reason starts with
+        // '[INFO]' or '[WARNING]' from the failed count — those are success
+        // cases with attached notes (e.g. YouTube Shorts criteria info,
+        // Buffer post created but pending). They already have published_at
+        // set so they're counted as published, not failed.
         $publishedCount = $post->socialAccounts()
             ->wherePivotNotNull('published_at')
             ->count();
+
+        // Real failures: published_at IS NULL AND failure_reason is NOT NULL
+        // AND failure_reason does NOT start with [INFO] or [WARNING]
+        // (those prefixes are attached to SUCCESS rows as informational notes)
         $failedCount = $post->socialAccounts()
+            ->wherePivotNull('published_at')
             ->wherePivotNotNull('failure_reason')
             ->count();
 
-        // All done?
-        if ($publishedCount + $failedCount === $totalAccounts) {
+        // Done = all accounts have either published_at OR a real failure
+        $doneCount = $publishedCount + $failedCount;
+
+        if ($doneCount >= $totalAccounts) {
             if ($publishedCount === $totalAccounts) {
+                // All published (some may have [INFO]/[WARNING] notes)
                 $post->update([
                     'status' => Post::STATUS_PUBLISHED,
                     'published_at' => now(),
@@ -129,6 +147,7 @@ class PublishPostJob implements ShouldQueue
                     'failure_reason' => "Published to {$publishedCount}/{$totalAccounts} accounts",
                 ]);
             } else {
+                // All failed
                 $post->update([
                     'status' => Post::STATUS_FAILED,
                     'failure_reason' => "Failed on all {$totalAccounts} accounts",
