@@ -227,9 +227,21 @@ class BufferPublisher implements PublisherInterface
             $parts[] = "{$channelService}: { firstComment: " . json_encode($firstComment) . " }";
         }
 
-        // Pinterest board — required for Pinterest posts via Buffer
-        if ($channelService === 'pinterest' && !empty($accountMetadata['pinterest_board_id'])) {
-            $parts[] = "pinterest: { boardServiceId: " . json_encode($accountMetadata['pinterest_board_id']) . " }";
+        // Pinterest board + title + destination link
+        if ($channelService === 'pinterest') {
+            $pinFields = [];
+            if (!empty($accountMetadata['pinterest_board_id'])) {
+                $pinFields[] = 'boardServiceId: ' . json_encode($accountMetadata['pinterest_board_id']);
+            }
+            if (!empty($accountMetadata['pinterest_title'])) {
+                $pinFields[] = 'title: ' . json_encode(mb_substr($accountMetadata['pinterest_title'], 0, 100));
+            }
+            if (!empty($accountMetadata['pinterest_link'])) {
+                $pinFields[] = 'link: ' . json_encode($accountMetadata['pinterest_link']);
+            }
+            if (!empty($pinFields)) {
+                $parts[] = 'pinterest: { ' . implode(', ', $pinFields) . ' }';
+            }
         }
 
         // Instagram post type (post/reel/story) — from channel metadata

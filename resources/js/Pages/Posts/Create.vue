@@ -467,20 +467,38 @@ const minDate = () => {
                                 </p>
                             </div>
 
-                            <!-- Buffer Pinterest board picker (inline, shown when account is selected) -->
+                            <!-- Buffer Pinterest board picker + title + link (inline) -->
                             <div v-if="isBufferPinterest(account) && form.account_ids.includes(account.id)"
-                                class="mt-2 ml-8 pl-3 border-l-2 border-red-200">
-                                <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
-                                <div v-if="loadingBoardsFor[account.id]" class="text-xs text-gray-400">Loading boards…</div>
-                                <select v-else-if="bufferBoards[account.id]?.length > 0"
-                                    :value="form.account_overrides[account.id]?.pinterest_board_id || ''"
-                                    @change="setOverride(account.id, 'pinterest_board_id', $event.target.value)"
-                                    class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500">
-                                    <option v-for="board in bufferBoards[account.id]" :key="board.serviceId" :value="board.serviceId">
-                                        {{ board.name }}
-                                    </option>
-                                </select>
-                                <p v-else class="text-xs text-gray-400">No boards found on this Pinterest account.</p>
+                                class="mt-2 ml-8 pl-3 border-l-2 border-red-200 space-y-2">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
+                                    <div v-if="loadingBoardsFor[account.id]" class="text-xs text-gray-400">Loading boards…</div>
+                                    <select v-else-if="bufferBoards[account.id]?.length > 0"
+                                        :value="form.account_overrides[account.id]?.pinterest_board_id || ''"
+                                        @change="setOverride(account.id, 'pinterest_board_id', $event.target.value)"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500">
+                                        <option v-for="board in bufferBoards[account.id]" :key="board.serviceId" :value="board.serviceId">
+                                            {{ board.name }}
+                                        </option>
+                                    </select>
+                                    <p v-else class="text-xs text-gray-400">No boards found on this Pinterest account.</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">📝 Pin Title (max 100 chars)</label>
+                                    <input type="text" maxlength="100"
+                                        :value="form.account_overrides[account.id]?.pinterest_title || ''"
+                                        @input="setOverride(account.id, 'pinterest_title', $event.target.value)"
+                                        placeholder="Judul pin yang menarik…"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">🔗 Destination Link (URL tujuan pin)</label>
+                                    <input type="url"
+                                        :value="form.account_overrides[account.id]?.pinterest_link || ''"
+                                        @input="setOverride(account.id, 'pinterest_link', $event.target.value)"
+                                        placeholder="https://warunglakku.com/promo"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500" />
+                                </div>
                             </div>
 
                             <!-- Buffer Instagram mode picker (inline) -->
