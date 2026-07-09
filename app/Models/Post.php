@@ -50,4 +50,9 @@ class Post extends Model
     {
         return $this->belongsToMany(SocialAccount::class, 'post_social_account');
     }
+
+    public function metrics()
+    {
+        return $this->hasMany(PostMetric::class);
+    }
 }
