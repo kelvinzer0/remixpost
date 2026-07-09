@@ -19,6 +19,7 @@ services:
       - "${APP_PORT:-8080}:80"
     networks:
       - remixpost_net
+      - evolution-network
 
   mysql:
     image: mysql:8.0
@@ -50,6 +51,13 @@ services:
 networks:
   remixpost_net:
     driver: bridge
+  # External network owned by the evolution-api-docker-compose stack.
+  # Lets this container resolve `evolution_api` (Evolution API / Baileys REST
+  # wrapper) so WhatsApp publisher can call /instance/fetchInstances and
+  # /message/send* without going through the host port.
+  evolution-network:
+    external: true
+    name: evolution-api-docker-compose_evolution-network
 
 volumes:
   mysql_data:
