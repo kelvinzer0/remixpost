@@ -1684,7 +1684,7 @@ class SocialAccountController extends Controller
         $orgId = $organization['id'];
 
         // Fetch channels (Buffer calls them "channels", formerly "profiles")
-        $channelsQuery = 'query GetChannels($orgId: ID!) {
+        $channelsQuery = 'query GetChannels($orgId: OrganizationId!) {
   channels(input: { organizationId: $orgId, filter: { isLocked: false } }) {
     id
     name
@@ -1757,7 +1757,7 @@ class SocialAccountController extends Controller
             $orgId = $organizations[0]['id'];
         }
 
-        $channelsQuery = 'query GetChannels($orgId: ID!) {
+        $channelsQuery = 'query GetChannels($orgId: OrganizationId!) {
   channels(input: { organizationId: $orgId, filter: { isLocked: false } }) {
     id name displayName service avatar isDisconnected
   }
