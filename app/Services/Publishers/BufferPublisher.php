@@ -227,7 +227,7 @@ class BufferPublisher implements PublisherInterface
             $parts[] = "{$channelService}: { firstComment: " . json_encode($firstComment) . " }";
         }
 
-        // Pinterest board + title + destination link
+        // Pinterest board + title (destination link not supported by Buffer PinterestPostMetadataInput)
         if ($channelService === 'pinterest') {
             $pinFields = [];
             if (!empty($accountMetadata['pinterest_board_id'])) {
@@ -236,9 +236,8 @@ class BufferPublisher implements PublisherInterface
             if (!empty($accountMetadata['pinterest_title'])) {
                 $pinFields[] = 'title: ' . json_encode(mb_substr($accountMetadata['pinterest_title'], 0, 100));
             }
-            if (!empty($accountMetadata['pinterest_link'])) {
-                $pinFields[] = 'link: ' . json_encode($accountMetadata['pinterest_link']);
-            }
+            // Note: 'link' field is NOT supported by Buffer's PinterestPostMetadataInput.
+            // Destination link is not available via Buffer API for Pinterest.
             if (!empty($pinFields)) {
                 $parts[] = 'pinterest: { ' . implode(', ', $pinFields) . ' }';
             }
