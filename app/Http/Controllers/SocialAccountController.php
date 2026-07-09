@@ -1780,7 +1780,6 @@ class SocialAccountController extends Controller
 
             $service = $ch['service'] ?? 'unknown';
             $displayName = $ch['displayName'] ?? $ch['name'] ?? "Buffer {$service}";
-            $name = "{$displayName} (Buffer → {$service})";
 
             // Build metadata — include per-channel config
             $metadata = [
@@ -1792,20 +1791,36 @@ class SocialAccountController extends Controller
                 'buffer_account_email' => $account['email'] ?? null,
             ];
 
-            // Add Pinterest board ID if provided
+            // Build provider_id with optional suffix for Pinterest/Instagram
+            // so user can connect same channel multiple times with different
+            // board/mode (same pattern as YouTube :video/:short suffix).
+            $providerId = $channelId;
+            $displayNameWithConfig = $displayName;
+
             if ($service === 'pinterest' && !empty($channelConfigs[$channelId]['pinterest_board_id'])) {
-                $metadata['pinterest_board_id'] = $channelConfigs[$channelId]['pinterest_board_id'];
+                $boardId = $channelConfigs[$channelId]['pinterest_board_id'];
+                $metadata['pinterest_board_id'] = $boardId;
+                $providerId = $channelId . ':board:' . $boardId;
+                // Try to find board name from the config fetched in session
+                $boards = session('buffer_pinterest_boards_' . $channelId, []);
+                $boardName = collect($boards)->firstWhere('serviceId', $boardId)['name'] ?? $boardId;
+                $displayNameWithConfig = "{$displayName} (Board: {$boardName})";
             }
 
-            // Add Instagram post type if provided
             if ($service === 'instagram' && !empty($channelConfigs[$channelId]['instagram_post_type'])) {
-                $metadata['instagram_post_type'] = $channelConfigs[$channelId]['instagram_post_type'];
+                $postType = $channelConfigs[$channelId]['instagram_post_type'];
+                $metadata['instagram_post_type'] = $postType;
+                $providerId = $channelId . ':' . $postType;
+                $modeLabel = ucfirst($postType);
+                $displayNameWithConfig = "{$displayName} ({$modeLabel})";
             }
+
+            $name = "{$displayNameWithConfig} (Buffer → {$service})";
 
             SocialAccount::updateOrCreate(
                 [
                     'provider' => 'buffer',
-                    'provider_id' => $channelId,
+                    'provider_id' => $providerId,
                 ],
                 [
                     'user_id' => $userId,
@@ -1828,6 +1843,12 @@ class SocialAccountController extends Controller
             'buffer_account', 'buffer_organizations', 'buffer_code_verifier',
             'buffer_state', 'oauth_user_id',
         ]);
+        // Clean up Pinterest board sessions (keys like buffer_pinterest_boards_*)
+        foreach (array_keys(session()->all()) as $key) {
+            if (str_starts_with($key, 'buffer_pinterest_boards_')) {
+                session()->forget($key);
+            }
+        }
 
         $msg = $connectedCount === 1
             ? "Buffer channel '{$connectedNames[0]}' connected successfully."
@@ -1889,6 +1910,10 @@ class SocialAccountController extends Controller
             if ($metadata && is_array($metadata)) {
                 $boards = $metadata['boards'] ?? [];
             }
+
+            // Store boards in session so selectBufferChannel can look up
+            // board names when building display names with suffix.
+            session(['buffer_pinterest_boards_' . $channelId => $boards]);
 
             return response()->json(['boards' => $boards, 'channel_name' => $channel['name'] ?? '']);
         } catch (\Exception $e) {
