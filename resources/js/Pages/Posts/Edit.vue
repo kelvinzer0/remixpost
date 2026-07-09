@@ -600,6 +600,9 @@ const supportsTags = computed(() => {
                                 <div v-if="form.account_overrides[account.id]?.target_type === 'story'"
                                     class="text-xs text-gray-500 italic p-2 bg-green-50 rounded">
                                     📖 Story akan diposting ke status WhatsApp kamu. Wajib attach media (image/video).
+                                    <span v-if="form.media_urls.length === 0" class="block mt-1 text-red-600 font-semibold not-italic">
+                                        ⚠️ Belum ada media di post ini — story WA tidak bisa dikirim tanpa media! Tambah media lewat halaman Create.
+                                    </span>
                                 </div>
 
                                 <!-- Group/Channel/User target list with pictures -->

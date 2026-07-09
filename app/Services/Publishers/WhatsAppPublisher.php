@@ -72,9 +72,13 @@ class WhatsAppPublisher implements PublisherInterface
             $targetType = $perPost['target_type']
                 ?? $metadata['target_type']
                 ?? null;
-            $target = $perPost['target']
+            // Coerce null target to empty string — frontend sometimes sends
+            // `target: null` when the user picks Story (no target needed),
+            // and PHP's ?? operator passes null through, which would later
+            // fail strict empty() checks.
+            $target = (string) ($perPost['target']
                 ?? $metadata['target']
-                ?? '';
+                ?? '');
 
             if (!$evoUrl || !$instance || !$apiKey) {
                 return [
