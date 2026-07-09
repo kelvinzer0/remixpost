@@ -15,6 +15,7 @@ const providers = [
     { id: 'pinterest', name: 'Pinterest', color: 'bg-red-700', icon: 'P', oauth: true, note: 'Image/Video' },
     { id: 'telegram', name: 'Telegram Channel', color: 'bg-blue-500', icon: '✈', oauth: false },
     { id: 'email', name: 'Email Newsletter', color: 'bg-gray-600', icon: '✉', oauth: false },
+    { id: 'discord', name: 'Discord Channel', color: 'bg-indigo-600', icon: '🎮', oauth: false },
 ];
 
 // Telegram manual connect form
@@ -51,6 +52,18 @@ const connectMastodon = () => {
     });
 };
 
+// Discord connect form — user provides webhook URL
+const discordForm = useForm({
+    webhook_url: '',
+    display_name: '',
+});
+
+const connectDiscord = () => {
+    discordForm.post('/integrations/social/connect-discord', {
+        onSuccess: () => discordForm.reset(),
+    });
+};
+
 const oauthProviders = providers.filter(p => p.oauth);
 const manualProviders = providers.filter(p => !p.oauth);
 </script>
@@ -84,6 +97,7 @@ const manualProviders = providers.filter(p => !p.oauth);
                                     'bg-blue-500': account.provider === 'telegram',
                                     'bg-gray-600': account.provider === 'email',
                                     'bg-pink-500': account.provider === 'instagram',
+                                    'bg-indigo-600': account.provider === 'discord',
                                 }">
                                 {{ account.provider.charAt(0).toUpperCase() }}
                             </div>
@@ -233,6 +247,47 @@ const manualProviders = providers.filter(p => !p.oauth);
                         <button type="submit" :disabled="emailForm.processing"
                             class="w-full py-2 text-xs font-medium text-center text-white bg-gray-600 rounded-md hover:bg-gray-700 disabled:opacity-50">
                             Connect Email Recipient
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Discord -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <div class="flex items-center mb-4">
+                        <div class="flex items-center justify-center w-10 h-10 rounded-full text-white text-lg font-bold bg-indigo-600">
+                            🎮
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-gray-900">Discord Channel</p>
+                            <p class="text-xs text-gray-500">Posts via Webhook (no bot setup)</p>
+                        </div>
+                    </div>
+                    <div class="mb-3 p-2 bg-indigo-50 border border-indigo-200 rounded text-xs text-indigo-800">
+                        <p class="font-medium mb-1">Setup steps:</p>
+                        <ol class="list-decimal ml-4 space-y-0.5">
+                            <li>In Discord: Channel Settings → <strong>Integrations</strong> → <strong>Webhooks</strong></li>
+                            <li>Click <strong>New Webhook</strong>, customize name + avatar</li>
+                            <li>Click <strong>Copy Webhook URL</strong></li>
+                            <li>Paste URL below</li>
+                        </ol>
+                    </div>
+                    <form @submit.prevent="connectDiscord" class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Webhook URL</label>
+                            <input v-model="discordForm.webhook_url" type="url" required
+                                placeholder="https://discord.com/api/webhooks/..."
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm font-mono" />
+                            <p v-if="discordForm.errors.webhook_url" class="mt-1 text-xs text-red-600">{{ discordForm.errors.webhook_url }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Display name (optional)</label>
+                            <input v-model="discordForm.display_name" type="text"
+                                placeholder="My Discord Server #general"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+                        </div>
+                        <button type="submit" :disabled="discordForm.processing"
+                            class="w-full py-2 text-xs font-medium text-center text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">
+                            {{ discordForm.processing ? 'Validating webhook...' : 'Connect Discord Webhook' }}
                         </button>
                     </form>
                 </div>

@@ -1349,4 +1349,99 @@ class SocialAccountController extends Controller
         return redirect()->route('social-accounts.index')
             ->with('message', "Mastodon account '{$fullHandle}' connected successfully.");
     }
+
+    /**
+     * Connect a Discord channel via webhook URL.
+     *
+     * Discord doesn't need OAuth for posting — webhooks are the simplest
+     * way to send messages to a channel programmatically. User creates a
+     * webhook in Discord channel settings, pastes the URL here.
+     *
+     * Setup steps for user:
+     *   1. In Discord: Channel Settings → Integrations → Webhooks → New Webhook
+     *   2. Customize name + avatar (optional)
+     *   3. Copy Webhook URL
+     *   4. Paste below
+     *
+     * We validate the webhook URL by fetching its metadata via
+     * GET {webhook_url} — returns { id, name, channel_id, guild_id, avatar }.
+     * If validation fails, we reject the connection.
+     */
+    public function connectDiscord(Request $request)
+    {
+        $validated = $request->validate([
+            'webhook_url' => 'required|string|url|max:500',
+            'display_name' => 'nullable|string|max:100',
+        ]);
+
+        $webhookUrl = $validated['webhook_url'];
+        $displayName = $validated['display_name'] ?? '';
+
+        // Validate URL format
+        if (!preg_match('#^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$#', $webhookUrl)) {
+            return back()->with('error', 'Invalid Discord webhook URL. Expected format: https://discord.com/api/webhooks/{id}/{token}');
+        }
+
+        // Fetch webhook metadata to validate it's a real, working webhook
+        try {
+            $response = Http::get($webhookUrl);
+
+            if (!$response->ok()) {
+                $status = $response->status();
+                $body = $response->body();
+                if ($status === 401 || $status === 403) {
+                    return back()->with('error', 'Webhook URL is invalid or token is wrong. Copy the full URL from Discord channel settings.');
+                } elseif ($status === 404) {
+                    return back()->with('error', 'Webhook not found — it may have been deleted. Create a new one in Discord.');
+                }
+                return back()->with('error', "Failed to validate webhook (HTTP {$status}): {$body}");
+            }
+
+            $webhook = $response->json();
+            $webhookId = (string) ($webhook['id'] ?? '');
+            $webhookName = $webhook['name'] ?? 'Discord Webhook';
+            $channelId = (string) ($webhook['channel_id'] ?? '');
+            $guildId = (string) ($webhook['guild_id'] ?? '');
+            $avatarHash = $webhook['avatar'] ?? null;
+
+            if (!$webhookId) {
+                return back()->with('error', 'Webhook response did not include ID. Invalid webhook?');
+            }
+        } catch (\Exception $e) {
+            return back()->with('error', 'Cannot reach Discord to validate webhook: ' . $e->getMessage());
+        }
+
+        // Build display name
+        $name = trim($displayName) ?: $webhookName;
+        $avatar = $avatarHash ? "https://cdn.discordapp.com/avatars/{$webhookId}/{$avatarHash}.png" : null;
+
+        // Store SocialAccount. provider_id is the full webhook URL (so we can POST to it).
+        // We also store webhook metadata (id, channel_id, guild_id, name) for reference.
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'discord',
+                'provider_id' => $webhookUrl,
+            ],
+            [
+                'user_id' => $request->user()->id,
+                'name' => $name,
+                'username' => $webhookName,
+                'avatar' => $avatar,
+                'access_token' => 'webhook', // Placeholder — webhook URL itself is the credential
+                'refresh_token' => null,
+                'expires_at' => null, // Webhooks don't expire
+                'is_active' => true,
+                'metadata' => [
+                    'webhook_id' => $webhookId,
+                    'webhook_name' => $webhookName,
+                    'channel_id' => $channelId,
+                    'guild_id' => $guildId,
+                    'connection_type' => 'webhook',
+                ],
+            ]
+        );
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Discord webhook '{$name}' connected successfully.");
+    }
 }

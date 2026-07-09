@@ -49,6 +49,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/integrations/social/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
     Route::post('/integrations/social/verify-telegram', [SocialAccountController::class, 'verifyTelegram'])->name('social-accounts.verify-telegram');
     Route::post('/integrations/social/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
+    // Discord — manual webhook URL input (no OAuth needed)
+    Route::post('/integrations/social/connect-discord', [SocialAccountController::class, 'connectDiscord'])->name('social-accounts.connect-discord');
     Route::post('/integrations/social/select-youtube-channel', [SocialAccountController::class, 'selectYoutubeChannel'])->name('social-accounts.select-youtube-channel');
     Route::post('/integrations/social/select-linkedin-page', [SocialAccountController::class, 'selectLinkedinPage'])->name('social-accounts.select-linkedin-page');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');

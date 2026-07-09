@@ -135,6 +135,17 @@ class PlatformRequirements
                 'max_content_length' => null,
                 'notes' => 'Text-only OK. Images embedded inline; videos and other media become clickable links.',
             ],
+            'discord' => [
+                'label' => 'Discord',
+                'color' => 'bg-indigo-600',
+                'requires_media' => false,
+                'media_type' => null,
+                'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
+                'max_content_length' => 2000,
+                'notes' => 'Text-only OK. Posts via webhook. Max 2000 chars per message. Supports up to 10 attachments (images + videos).',
+            ],
         ];
     }
 

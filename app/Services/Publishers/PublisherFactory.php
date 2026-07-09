@@ -19,6 +19,7 @@ class PublisherFactory
             'youtube' => new YouTubePublisher(),
             'tiktok' => new TikTokPublisher(),
             'email' => new EmailPublisher(),
+            'discord' => new DiscordPublisher(),
             default => throw new InvalidArgumentException("Unknown provider: {$provider}"),
         };
     }
