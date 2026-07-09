@@ -130,19 +130,15 @@ const manualProviders = providers.filter(p => !p.oauth);
                                 class="ml-3 px-2 py-0.5 text-xs font-medium text-blue-800 bg-blue-50 rounded-full border border-blue-200 capitalize">
                                 → {{ account.metadata.channel_service }}
                             </span>
-                            <!-- Buffer IG post type badge -->
-                            <span v-if="account.provider === 'buffer' && account.metadata?.channel_service === 'instagram' && account.metadata?.instagram_post_type"
-                                class="ml-2 px-2 py-0.5 text-xs font-medium text-pink-700 bg-pink-100 rounded-full capitalize">
-                                {{ account.metadata.instagram_post_type }}
+                            <!-- Buffer IG mode badge — mode dipilih per-post -->
+                            <span v-if="account.provider === 'buffer' && account.metadata?.channel_service === 'instagram'"
+                                class="ml-2 px-2 py-0.5 text-xs font-medium text-pink-700 bg-pink-100 rounded-full border border-pink-200">
+                                📷 Mode per-post
                             </span>
-                            <!-- Buffer Pinterest board badge -->
-                            <span v-if="account.provider === 'buffer' && account.metadata?.channel_service === 'pinterest' && account.metadata?.pinterest_board_id"
+                            <!-- Buffer Pinterest badge — board dipilih per-post -->
+                            <span v-if="account.provider === 'buffer' && account.metadata?.channel_service === 'pinterest'"
                                 class="ml-2 px-2 py-0.5 text-xs font-medium text-red-700 bg-red-50 rounded-full border border-red-200">
-                                📌 Board: {{ account.metadata.pinterest_board_id.substring(0, 12) }}…
-                            </span>
-                            <span v-else-if="account.provider === 'buffer' && account.metadata?.channel_service === 'pinterest' && !account.metadata?.pinterest_board_id"
-                                class="ml-2 px-2 py-0.5 text-xs font-medium text-orange-700 bg-orange-100 rounded-full border border-orange-200">
-                                ⚠ No board
+                                📌 Board per-post
                             </span>
                             <!-- Reconnect required badge for YouTube without refresh_token -->
                             <span v-if="account.provider === 'youtube' && !account.has_refresh_token"
