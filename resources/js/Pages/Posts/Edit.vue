@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
@@ -12,6 +12,9 @@ const props = defineProps({
 const page = usePage();
 const platformRequirements = computed(() => page.props.platformRequirements || {});
 
+// Load existing account_overrides from post (if any)
+const existingOverrides = props.post.account_overrides || {};
+
 const form = useForm({
     content: props.post.content,
     media_urls: props.post.media_urls || [],
@@ -19,10 +22,84 @@ const form = useForm({
     tagInput: '',
     first_comment: props.post.first_comment || '',
     alt_text: props.post.alt_text || '',
+    account_overrides: { ...existingOverrides },
     account_ids: props.post.social_accounts?.map(a => a.id) || [],
     scheduled_at: props.post.scheduled_at
         ? new Date(props.post.scheduled_at).toISOString().slice(0, 16)
         : '',
+});
+
+// ===== Buffer per-account overrides (Pinterest board + IG mode) =====
+const bufferBoards = ref({}); // { accountId: [{ serviceId, name }] }
+const loadingBoardsFor = ref({});
+
+const isBufferPinterest = (account) =>
+    account.provider === 'buffer' && account.metadata?.channel_service === 'pinterest';
+
+const isBufferInstagram = (account) =>
+    account.provider === 'buffer' && account.metadata?.channel_service === 'instagram';
+
+const fetchBoardsForAccount = async (accountId) => {
+    loadingBoardsFor.value[accountId] = true;
+    try {
+        const response = await fetch('/ai/buffer-account-boards', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ account_id: accountId }),
+        });
+        const data = await response.json();
+        if (data.boards) {
+            bufferBoards.value[accountId] = data.boards;
+            // If no override exists yet, default to first board
+            if (!form.account_overrides[accountId]?.pinterest_board_id && data.boards.length > 0) {
+                setOverride(accountId, 'pinterest_board_id', data.boards[0]?.serviceId);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch boards:', e);
+    } finally {
+        loadingBoardsFor.value[accountId] = false;
+    }
+};
+
+const setOverride = (accountId, key, value) => {
+    if (!form.account_overrides[accountId]) {
+        form.account_overrides[accountId] = {};
+    }
+    form.account_overrides[accountId][key] = value;
+};
+
+const onAccountToggle = (accountId) => {
+    const account = props.accounts.find(a => a.id === accountId);
+    if (!account) return;
+
+    if (form.account_ids.includes(accountId)) {
+        // Just checked — if Buffer Pinterest, fetch boards
+        if (isBufferPinterest(account)) {
+            fetchBoardsForAccount(accountId);
+        }
+        // If Buffer Instagram, default to 'post' if no override
+        if (isBufferInstagram(account) && !form.account_overrides[accountId]?.instagram_post_type) {
+            setOverride(accountId, 'instagram_post_type', 'post');
+        }
+    } else {
+        // Just unchecked — clean up override
+        delete form.account_overrides[accountId];
+    }
+};
+
+// On mount: fetch boards for already-selected Pinterest accounts
+// (e.g. when editing a duplicated post that has Buffer Pinterest selected)
+props.accounts.forEach(account => {
+    if (isBufferPinterest(account) && form.account_ids.includes(account.id)) {
+        fetchBoardsForAccount(account.id);
+    }
 });
 
 const providerFallback = {
@@ -140,6 +217,17 @@ const submit = () => {
     if (!canSubmit.value) return;
     const data = form.data();
     delete data.tagInput;
+    // Clean up empty overrides
+    if (data.account_overrides) {
+        Object.keys(data.account_overrides).forEach(key => {
+            if (!data.account_overrides[key] || Object.keys(data.account_overrides[key]).length === 0) {
+                delete data.account_overrides[key];
+            }
+        });
+        if (Object.keys(data.account_overrides).length === 0) {
+            delete data.account_overrides;
+        }
+    }
     form.transform(() => data).put(`/posts/${props.post.id}`, {
         onSuccess: () => form.reset(),
     });
@@ -222,6 +310,7 @@ const supportsTags = computed(() => {
                                     ? 'border-brand-400 bg-brand-50'
                                     : 'border-gray-200'">
                             <input type="checkbox" v-model="form.account_ids" :value="account.id"
+                                @change="onAccountToggle(account.id)"
                                 class="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
                             <div class="flex items-center justify-center w-8 h-8 rounded-full text-white text-xs ml-3"
                                 :class="getReq(account.provider).color || 'bg-gray-500'">
@@ -276,6 +365,69 @@ const supportsTags = computed(() => {
                                     class="mt-1 text-xs text-gray-400">
                                     {{ getReq(account.provider).notes }}
                                 </p>
+                            </div>
+
+                            <!-- Buffer Pinterest board + title + link (inline) -->
+                            <div v-if="isBufferPinterest(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-red-200 space-y-2">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
+                                    <div v-if="loadingBoardsFor[account.id]" class="text-xs text-gray-400">Loading boards…</div>
+                                    <select v-else-if="bufferBoards[account.id]?.length > 0"
+                                        :value="form.account_overrides[account.id]?.pinterest_board_id || ''"
+                                        @change="setOverride(account.id, 'pinterest_board_id', $event.target.value)"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500">
+                                        <option v-for="board in bufferBoards[account.id]" :key="board.serviceId" :value="board.serviceId">
+                                            {{ board.name }}
+                                        </option>
+                                    </select>
+                                    <p v-else class="text-xs text-gray-400">No boards found.</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">📝 Pin Title (max 100)</label>
+                                    <input type="text" maxlength="100"
+                                        :value="form.account_overrides[account.id]?.pinterest_title || ''"
+                                        @input="setOverride(account.id, 'pinterest_title', $event.target.value)"
+                                        placeholder="Judul pin…"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">🔗 Destination Link</label>
+                                    <input type="url"
+                                        :value="form.account_overrides[account.id]?.pinterest_link || ''"
+                                        @input="setOverride(account.id, 'pinterest_link', $event.target.value)"
+                                        placeholder="https://…"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500" />
+                                </div>
+                            </div>
+
+                            <!-- Buffer Instagram mode (inline) -->
+                            <div v-if="isBufferInstagram(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-pink-200">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">📷 IG Post Type</label>
+                                <div class="flex gap-3">
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-edit-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'post'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'post')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Feed Post</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-edit-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'reel'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'reel')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Reel</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-edit-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'story'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'story')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Story</span>
+                                    </label>
+                                </div>
                             </div>
                         </label>
                     </div>
