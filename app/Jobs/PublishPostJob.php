@@ -65,6 +65,8 @@ class PublishPostJob implements ShouldQueue
                 'tags' => $post->tags ?? [],
                 'first_comment' => $post->first_comment,
                 'alt_text' => $post->alt_text,
+                'account_overrides' => $post->account_overrides ?? [],
+                'account_id' => $account->id,
                 'scheduled_at' => $post->scheduled_at,
             ], [
                 'id' => $account->id,

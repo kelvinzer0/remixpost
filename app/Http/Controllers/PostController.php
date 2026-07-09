@@ -58,6 +58,7 @@ class PostController extends Controller
             'tags.*' => ['string', 'max:100'],
             'first_comment' => ['nullable', 'string', 'max:8000'],
             'alt_text' => ['nullable', 'string', 'max:1000'],
+            'account_overrides' => ['nullable', 'array'],
             'account_ids' => ['required', 'array', 'min:1'],
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
@@ -83,8 +84,6 @@ class PostController extends Controller
                 ->withInput();
         }
 
-        // datetime-local input sends naive local time (e.g. "2026-07-08T22:59")
-        // Parse it in app timezone so it's stored correctly
         $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone'));
 
         $post = $request->user()->posts()->create([
@@ -93,6 +92,7 @@ class PostController extends Controller
             'tags' => $validated['tags'] ?? [],
             'first_comment' => $validated['first_comment'] ?? null,
             'alt_text' => $validated['alt_text'] ?? null,
+            'account_overrides' => $validated['account_overrides'] ?? null,
             'scheduled_at' => $scheduledAt,
             'status' => Post::STATUS_SCHEDULED,
         ]);
@@ -160,6 +160,7 @@ class PostController extends Controller
             'tags.*' => ['string', 'max:100'],
             'first_comment' => ['nullable', 'string', 'max:8000'],
             'alt_text' => ['nullable', 'string', 'max:1000'],
+            'account_overrides' => ['nullable', 'array'],
             'account_ids' => ['required', 'array', 'min:1'],
             'account_ids.*' => ['exists:social_accounts,id'],
             'scheduled_at' => ['required', 'date', 'after:now'],
@@ -191,6 +192,7 @@ class PostController extends Controller
             'tags' => $validated['tags'] ?? [],
             'first_comment' => $validated['first_comment'] ?? null,
             'alt_text' => $validated['alt_text'] ?? null,
+            'account_overrides' => $validated['account_overrides'] ?? null,
             'scheduled_at' => \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone')),
             'status' => Post::STATUS_SCHEDULED,
             'failure_reason' => null,

@@ -80,4 +80,6 @@ Route::middleware('auth')->group(function () {
 
     // Buffer Pinterest boards fetcher (proxied GraphQL call)
     Route::post('/ai/buffer-pinterest-boards', [\App\Http\Controllers\SocialAccountController::class, 'fetchBufferPinterestBoards'])->name('social-accounts.buffer-pinterest-boards');
+    // Fetch Pinterest boards for an already-connected Buffer account (for post-time board picker)
+    Route::post('/ai/buffer-account-boards', [\App\Http\Controllers\SocialAccountController::class, 'fetchBufferAccountBoards'])->name('social-accounts.buffer-account-boards');
 });

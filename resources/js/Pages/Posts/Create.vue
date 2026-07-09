@@ -18,9 +18,77 @@ const form = useForm({
     tagInput: '',
     first_comment: '',
     alt_text: '',
+    account_overrides: {},
     account_ids: [],
     scheduled_at: '',
 });
+
+// ===== Buffer per-account overrides (Pinterest board + IG mode) =====
+const bufferBoards = ref({}); // { accountId: [{ serviceId, name }] }
+const loadingBoardsFor = ref({}); // { accountId: true/false }
+
+const isBufferPinterest = (account) =>
+    account.provider === 'buffer' && account.metadata?.channel_service === 'pinterest';
+
+const isBufferInstagram = (account) =>
+    account.provider === 'buffer' && account.metadata?.channel_service === 'instagram';
+
+const fetchBoardsForAccount = async (accountId) => {
+    loadingBoardsFor.value[accountId] = true;
+    try {
+        const response = await fetch('/ai/buffer-account-boards', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ account_id: accountId }),
+        });
+        const data = await response.json();
+        if (data.boards) {
+            bufferBoards.value[accountId] = data.boards;
+            // Auto-select default board (from account metadata or first)
+            const account = props.accounts.find(a => a.id === accountId);
+            const defaultBoard = account?.metadata?.pinterest_board_id;
+            if (defaultBoard || data.boards.length > 0) {
+                setOverride(accountId, 'pinterest_board_id', defaultBoard || data.boards[0]?.serviceId);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch boards:', e);
+    } finally {
+        loadingBoardsFor.value[accountId] = false;
+    }
+};
+
+const setOverride = (accountId, key, value) => {
+    if (!form.account_overrides[accountId]) {
+        form.account_overrides[accountId] = {};
+    }
+    form.account_overrides[accountId][key] = value;
+};
+
+const onAccountToggle = (accountId) => {
+    const account = props.accounts.find(a => a.id === accountId);
+    if (!account) return;
+
+    if (form.account_ids.includes(accountId)) {
+        // Just checked — if Buffer Pinterest, fetch boards
+        if (isBufferPinterest(account)) {
+            fetchBoardsForAccount(accountId);
+        }
+        // If Buffer Instagram, default to metadata value or 'post'
+        if (isBufferInstagram(account)) {
+            setOverride(accountId, 'instagram_post_type', account.metadata?.instagram_post_type || 'post');
+        }
+    } else {
+        // Just unchecked — clean up override
+        delete form.account_overrides[accountId];
+    }
+};
 
 // ===== AI Caption Generator =====
 const showAIModal = ref(false);
@@ -271,9 +339,19 @@ const canSubmit = computed(() =>
 
 const submit = () => {
     if (!canSubmit.value) return;
-    // Remove tagInput before submit (it's a UI helper field, not a form field)
     const data = form.data();
     delete data.tagInput;
+    // Clean up empty overrides
+    if (data.account_overrides) {
+        Object.keys(data.account_overrides).forEach(key => {
+            if (!data.account_overrides[key] || Object.keys(data.account_overrides[key]).length === 0) {
+                delete data.account_overrides[key];
+            }
+        });
+        if (Object.keys(data.account_overrides).length === 0) {
+            delete data.account_overrides;
+        }
+    }
     form.transform(() => data).post('/posts', {
         onSuccess: () => form.reset(),
     });
@@ -327,6 +405,7 @@ const minDate = () => {
                                     ? 'border-brand-400 bg-brand-50'
                                     : 'border-gray-200'">
                             <input type="checkbox" v-model="form.account_ids" :value="account.id"
+                                @change="onAccountToggle(account.id)"
                                 class="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
                             <img v-if="account.avatar" :src="account.avatar" :alt="account.name"
                                 class="w-8 h-8 rounded-full ml-3" />
@@ -386,6 +465,51 @@ const minDate = () => {
                                     class="mt-1 text-xs text-gray-400">
                                     {{ getReq(account.provider).notes }}
                                 </p>
+                            </div>
+
+                            <!-- Buffer Pinterest board picker (inline, shown when account is selected) -->
+                            <div v-if="isBufferPinterest(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-red-200">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
+                                <div v-if="loadingBoardsFor[account.id]" class="text-xs text-gray-400">Loading boards…</div>
+                                <select v-else-if="bufferBoards[account.id]?.length > 0"
+                                    :value="form.account_overrides[account.id]?.pinterest_board_id || ''"
+                                    @change="setOverride(account.id, 'pinterest_board_id', $event.target.value)"
+                                    class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-red-500 focus:ring-red-500">
+                                    <option v-for="board in bufferBoards[account.id]" :key="board.serviceId" :value="board.serviceId">
+                                        {{ board.name }}
+                                    </option>
+                                </select>
+                                <p v-else class="text-xs text-gray-400">No boards found on this Pinterest account.</p>
+                            </div>
+
+                            <!-- Buffer Instagram mode picker (inline) -->
+                            <div v-if="isBufferInstagram(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-pink-200">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">📷 IG Post Type</label>
+                                <div class="flex gap-3">
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-mode-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'post'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'post')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Feed Post</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-mode-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'reel'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'reel')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Reel</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                        <input type="radio" :name="'ig-mode-' + account.id"
+                                            :checked="form.account_overrides[account.id]?.instagram_post_type === 'story'"
+                                            @change="setOverride(account.id, 'instagram_post_type', 'story')"
+                                            class="text-pink-500 focus:ring-pink-400" />
+                                        <span class="text-xs text-gray-700">Story</span>
+                                    </label>
+                                </div>
                             </div>
                         </label>
                     </div>

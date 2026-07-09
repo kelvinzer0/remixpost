@@ -23,6 +23,7 @@ class Post extends Model
         'tags',
         'first_comment',
         'alt_text',
+        'account_overrides',
         'scheduled_at',
         'published_at',
         'status',
@@ -34,6 +35,7 @@ class Post extends Model
         return [
             'media_urls' => 'array',
             'tags' => 'array',
+            'account_overrides' => 'array',
             'scheduled_at' => 'datetime',
             'published_at' => 'datetime',
         ];

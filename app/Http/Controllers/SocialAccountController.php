@@ -1858,19 +1858,11 @@ class SocialAccountController extends Controller
             return response()->json(['error' => 'Buffer session expired'], 401);
         }
 
-        // Query Buffer GraphQL for channel metadata (Pinterest boards)
         $query = 'query GetChannelBoards($channelId: ChannelId!) {
   channel(input: { id: $channelId }) {
-    id
-    name
-    service
+    id name service
     metadata {
-      ... on PinterestMetadata {
-        boards {
-          serviceId
-          name
-        }
-      }
+      ... on PinterestMetadata { boards { serviceId name } }
     }
   }
 }';
@@ -1883,11 +1875,8 @@ class SocialAccountController extends Controller
                 ]);
 
             $body = $response->json();
-
             if (isset($body['errors']) && !empty($body['errors'])) {
-                return response()->json([
-                    'error' => 'Buffer API error: ' . ($body['errors'][0]['message'] ?? 'Unknown'),
-                ], 400);
+                return response()->json(['error' => 'Buffer API error: ' . ($body['errors'][0]['message'] ?? 'Unknown')], 400);
             }
 
             $channel = $body['data']['channel'] ?? null;
@@ -1895,18 +1884,78 @@ class SocialAccountController extends Controller
                 return response()->json(['error' => 'Channel not found'], 404);
             }
 
-            // Extract boards from metadata
             $boards = [];
             $metadata = $channel['metadata'] ?? null;
             if ($metadata && is_array($metadata)) {
-                // PinterestMetadata has boards array
                 $boards = $metadata['boards'] ?? [];
             }
 
-            return response()->json([
-                'boards' => $boards,
-                'channel_name' => $channel['name'] ?? '',
-            ]);
+            return response()->json(['boards' => $boards, 'channel_name' => $channel['name'] ?? '']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to fetch boards: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Fetch Pinterest boards for an already-connected Buffer account.
+     * Called by frontend when user creates a post and selects a Buffer → Pinterest account.
+     * Uses the stored access_token (not session token) since the user is already connected.
+     *
+     * POST /ai/buffer-account-boards
+     * Body: { account_id: int }
+     * Returns: { boards: [{ serviceId, name }] }
+     */
+    public function fetchBufferAccountBoards(Request $request)
+    {
+        $validated = $request->validate([
+            'account_id' => 'required|exists:social_accounts,id',
+        ]);
+
+        $account = SocialAccount::findOrFail($validated['account_id']);
+        $this->authorize('update', $account);
+
+        // Ensure this is a Buffer Pinterest account
+        if ($account->provider !== 'buffer') {
+            return response()->json(['error' => 'Not a Buffer account'], 400);
+        }
+
+        $metadata = is_string($account->metadata) ? json_decode($account->metadata, true) : ($account->metadata ?? []);
+        if (($metadata['channel_service'] ?? '') !== 'pinterest') {
+            return response()->json(['error' => 'Not a Pinterest channel'], 400);
+        }
+
+        $channelId = $metadata['channel_id'] ?? $account->provider_id;
+        $accessToken = $account->access_token;
+
+        $query = 'query GetChannelBoards($channelId: ChannelId!) {
+  channel(input: { id: $channelId }) {
+    id name service
+    metadata {
+      ... on PinterestMetadata { boards { serviceId name } }
+    }
+  }
+}';
+
+        try {
+            $response = Http::withToken($accessToken)
+                ->post(config('services.buffer.api_url'), [
+                    'query' => $query,
+                    'variables' => ['channelId' => $channelId],
+                ]);
+
+            $body = $response->json();
+            if (isset($body['errors']) && !empty($body['errors'])) {
+                return response()->json(['error' => 'Buffer API error: ' . ($body['errors'][0]['message'] ?? 'Unknown')], 400);
+            }
+
+            $channel = $body['data']['channel'] ?? null;
+            $boards = [];
+            $meta = $channel['metadata'] ?? null;
+            if ($meta && is_array($meta)) {
+                $boards = $meta['boards'] ?? [];
+            }
+
+            return response()->json(['boards' => $boards]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to fetch boards: ' . $e->getMessage()], 500);
         }

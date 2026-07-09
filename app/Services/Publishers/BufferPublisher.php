@@ -72,6 +72,14 @@ class BufferPublisher implements PublisherInterface
                 : ($account['metadata'] ?? []);
             $channelId = $metadata['channel_id'] ?? $account['provider_id'];
 
+            // Apply per-post overrides (user can pick different board/IG mode per post)
+            // Overrides are stored as { "accountId": { "pinterest_board_id": "xxx" } }
+            $accountId = (string) ($post['account_id'] ?? $account['id'] ?? '');
+            $overrides = $post['account_overrides'] ?? [];
+            if (!empty($overrides[$accountId])) {
+                $metadata = array_merge($metadata, $overrides[$accountId]);
+            }
+
             if (!$channelId) {
                 return [
                     'success' => false,
