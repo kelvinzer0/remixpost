@@ -56,6 +56,8 @@ const copyUrl = (url) => {
 };
 
 const isImage = (mimeType) => mimeType?.startsWith('image/');
+const isVideo = (mimeType) => mimeType?.startsWith('video/');
+const isPdf = (mimeType) => mimeType === 'application/pdf';
 </script>
 
 <template>
@@ -77,9 +79,10 @@ const isImage = (mimeType) => mimeType?.startsWith('image/');
                     <p class="text-sm font-medium text-gray-700">
                         {{ uploading ? 'Uploading...' : 'Click to upload media' }}
                     </p>
-                    <p class="text-xs text-gray-500 mt-1">PNG, JPG, GIF, MP4 up to 10MB</p>
+                    <p class="text-xs text-gray-500 mt-1">PNG · JPG · GIF · WebP · MP4 · MOV · PDF — up to 100MB</p>
+                    <p class="text-[10px] text-gray-400 mt-1">PDF supported by LinkedIn (document carousel)</p>
                 </div>
-                <input type="file" class="hidden" @change="uploadFile" accept="image/*,video/*" :disabled="uploading" />
+                <input type="file" class="hidden" @change="uploadFile" accept="image/*,video/*,.pdf" :disabled="uploading" />
             </label>
             <p v-if="uploadError" class="mt-2 text-sm text-red-600">{{ uploadError }}</p>
         </div>
@@ -96,8 +99,19 @@ const isImage = (mimeType) => mimeType?.startsWith('image/');
                     <div class="aspect-square bg-gray-100 flex items-center justify-center">
                         <img v-if="isImage(item.mime_type)" :src="item.url" :alt="item.original_name"
                             class="w-full h-full object-cover" />
-                        <div v-else class="text-gray-400 text-xs p-4 text-center">
-                            {{ item.mime_type }}
+                        <div v-else-if="isVideo(item.mime_type)" class="flex flex-col items-center justify-center">
+                            <svg class="w-10 h-10 text-gray-700" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
+                            <span class="text-[10px] text-gray-500 mt-1 font-semibold">VIDEO</span>
+                        </div>
+                        <div v-else-if="isPdf(item.mime_type)" class="flex flex-col items-center justify-center">
+                            <svg class="w-10 h-10 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                            <span class="text-[10px] text-rose-700 mt-1 font-semibold">PDF</span>
+                        </div>
+                        <div v-else class="flex flex-col items-center justify-center">
+                            <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span class="text-[10px] text-gray-500 mt-1">{{ item.mime_type?.split('/')[1]?.toUpperCase() || 'FILE' }}</span>
                         </div>
                     </div>
                     <!-- Info -->
