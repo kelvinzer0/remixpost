@@ -76,12 +76,12 @@ const connectBuffer = () => {
 };
 
 // WhatsApp connect — via Evolution API (Baileys)
+// Connection is instance-level only. Per-post target (story/group/channel/user)
+// is picked in the Create Post page using the fetchWhatsAppTargets endpoint.
 const whatsappForm = useForm({
     evo_url: 'http://evolution_api:8080',
     instance: '',
     api_key: '',
-    target_type: 'user',
-    target: '',
     display_name: '',
 });
 
@@ -375,15 +375,16 @@ const manualProviders = providers.filter(p => !p.oauth);
                         </div>
                         <div class="ml-3">
                             <p class="text-sm font-medium text-gray-900">WhatsApp (Evo API)</p>
-                            <p class="text-xs text-gray-500">Via Evolution API (Baileys) — user, group, channel, story</p>
+                            <p class="text-xs text-gray-500">Via Evolution API (Baileys) — connection is instance-level</p>
                         </div>
                     </div>
                     <div class="mb-3 p-2 bg-green-50 border border-green-200 rounded text-xs text-green-800">
                         <p class="font-medium mb-1">Setup:</p>
                         <ol class="list-decimal ml-4 space-y-0.5">
                             <li>Buka Evolution API dashboard → buat instance → scan QR WhatsApp</li>
-                            <li>Catik Instance Name + API Key</li>
+                            <li>Catat Instance Name + API Key</li>
                             <li>Isi form di bawah → Connect</li>
+                            <li>Saat buat post, pilih target: User / Group / Channel / Story (dengan list otomatis + foto profil)</li>
                         </ol>
                     </div>
                     <form @submit.prevent="connectWhatsApp" class="space-y-3">
@@ -404,24 +405,6 @@ const manualProviders = providers.filter(p => !p.oauth);
                                 <label class="block text-xs font-medium text-gray-700">API Key</label>
                                 <input v-model="whatsappForm.api_key" type="text" required
                                     placeholder="evo-api-key-xxx"
-                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm font-mono" />
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-xs font-medium text-gray-700">Target Type</label>
-                                <select v-model="whatsappForm.target_type"
-                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm">
-                                    <option value="user">User (phone number)</option>
-                                    <option value="group">Group (JID)</option>
-                                    <option value="channel">Channel (JID)</option>
-                                    <option value="story">Story / Status</option>
-                                </select>
-                            </div>
-                            <div v-if="whatsappForm.target_type !== 'story'">
-                                <label class="block text-xs font-medium text-gray-700">Target</label>
-                                <input v-model="whatsappForm.target" type="text"
-                                    :placeholder="whatsappForm.target_type === 'user' ? '6281234567890' : '120363xxx@g.us'"
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm font-mono" />
                             </div>
                         </div>

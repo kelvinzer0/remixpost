@@ -63,6 +63,7 @@ Route::middleware('auth')->group(function () {
     // Discord — manual webhook URL input (no OAuth needed)
     Route::post('/integrations/social/connect-discord', [SocialAccountController::class, 'connectDiscord'])->name('social-accounts.connect-discord');
     Route::post('/integrations/social/connect-whatsapp', [SocialAccountController::class, 'connectWhatsApp'])->name('social-accounts.connect-whatsapp');
+    Route::post('/integrations/social/whatsapp-targets', [SocialAccountController::class, 'fetchWhatsAppTargets'])->name('social-accounts.whatsapp-targets');
     Route::post('/integrations/social/select-youtube-channel', [SocialAccountController::class, 'selectYoutubeChannel'])->name('social-accounts.select-youtube-channel');
     Route::post('/integrations/social/select-linkedin-page', [SocialAccountController::class, 'selectLinkedinPage'])->name('social-accounts.select-linkedin-page');
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');

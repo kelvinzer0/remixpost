@@ -236,7 +236,7 @@ class PlatformRequirements
                 'max_content_length' => 65536,
                 'max_media_size_mb' => 64,
                 'max_media_count' => 1,
-                'notes' => 'Via Evolution API (Baileys). Send to user (phone), group, channel, or story. Text-only OK. Story requires media.',
+                'notes' => 'Via Evolution API (Baileys). Pilih target saat buat post: User / Group / Channel / Story. Story butuh media.',
             ],
         ];
     }

@@ -1838,13 +1838,15 @@ class SocialAccountController extends Controller
     /**
      * Connect a WhatsApp account via Evolution API (Baileys).
      *
+     * Connection is instance-level only. Per-post target (story / channel /
+     * group / selected user) is chosen in the Create Post page using the
+     * fetchWhatsAppTargets endpoint.
+     *
      * User provides:
      *   - Evolution API URL (e.g. http://evolution_api:8080)
      *   - Instance name (created in Evolution API dashboard)
      *   - API key (from Evolution API instance settings)
-     *   - Target type: user (phone), group (JID), channel (JID), or story
-     *   - Target: phone number, group JID, channel JID, or null for story
-     *   - Display name (optional)
+     *   - Display name (optional — falls back to profile name / phone)
      */
     public function connectWhatsApp(Request $request)
     {
@@ -1852,24 +1854,21 @@ class SocialAccountController extends Controller
             'evo_url' => 'required|string|url|max:500',
             'instance' => 'required|string|max:100',
             'api_key' => 'required|string|max:200',
-            'target_type' => 'required|string|in:user,group,channel,story',
-            'target' => 'nullable|string|max:200',
             'display_name' => 'nullable|string|max:100',
         ]);
 
         $evoUrl = rtrim($validated['evo_url'], '/');
         $instance = $validated['instance'];
         $apiKey = $validated['api_key'];
-        $targetType = $validated['target_type'];
-        $target = $validated['target'] ?? '';
         $displayName = $validated['display_name'] ?? '';
 
-        // Validate: story doesn't need target, others do
-        if ($targetType !== 'story' && empty($target)) {
-            return back()->with('error', "Target is required for type '{$targetType}'.");
-        }
+        // Validate connection by calling Evolution API instance info.
+        // fetchInstances also returns the connected WhatsApp profile
+        // (phone number, display name, profile picture URL).
+        $phone = null;
+        $profileName = null;
+        $profilePic = null;
 
-        // Validate connection by calling Evolution API instance info
         try {
             $response = Http::withHeaders(['apikey' => $apiKey])
                 ->get("{$evoUrl}/instance/fetchInstances", [
@@ -1888,22 +1887,33 @@ class SocialAccountController extends Controller
             if ($state !== 'open' && $state !== 'connected') {
                 return back()->with('error', "Evolution API instance '{$instance}' is not connected to WhatsApp (state: {$state}). Scan QR code in Evolution API dashboard first.");
             }
+
+            // Extract profile info for nicer display in Connected Accounts
+            $phone = $instanceData['instance']['ownerJid']
+                ?? $instanceData['instance']['wuid']
+                ?? $instanceData['ownerJid']
+                ?? null;
+            $profileName = $instanceData['instance']['profileName']
+                ?? $instanceData['instance']['name']
+                ?? $instanceData['profileName']
+                ?? null;
+            $profilePic = $instanceData['instance']['profilePictureUrl']
+                ?? $instanceData['instance']['profilePicUrl']
+                ?? $instanceData['profilePictureUrl']
+                ?? null;
         } catch (\Exception $e) {
             return back()->with('error', 'Cannot reach Evolution API: ' . $e->getMessage());
         }
 
-        // Build display name
-        $targetLabel = match ($targetType) {
-            'user' => "WA: {$target}",
-            'group' => "WA Group: " . substr($target, 0, 30),
-            'channel' => "WA Channel: " . substr($target, 0, 30),
-            'story' => "WA Story",
-            default => "WhatsApp",
-        };
-        $name = trim($displayName) ?: $targetLabel;
+        // Build display name — prefer user-provided, then profile name, then phone
+        $fallbackName = trim(($profileName ?: '') . ($phone ? " ({$phone})" : ''));
+        if ($fallbackName === '') {
+            $fallbackName = "WhatsApp · {$instance}";
+        }
+        $name = trim($displayName) ?: $fallbackName;
 
-        // provider_id = unique key combining instance + target_type + target
-        $providerId = "{$instance}:{$targetType}:{$target}";
+        // provider_id = instance name only (one account per Evolution API instance)
+        $providerId = $instance;
 
         SocialAccount::updateOrCreate(
             [
@@ -1913,8 +1923,8 @@ class SocialAccountController extends Controller
             [
                 'user_id' => $request->user()->id,
                 'name' => $name,
-                'username' => $targetLabel,
-                'avatar' => null,
+                'username' => $phone ?: "instance:{$instance}",
+                'avatar' => $profilePic,
                 'access_token' => $apiKey, // API key stored as access_token
                 'refresh_token' => null,
                 'expires_at' => null, // API key doesn't expire
@@ -1922,15 +1932,164 @@ class SocialAccountController extends Controller
                 'metadata' => [
                     'evo_url' => $evoUrl,
                     'instance' => $instance,
-                    'target_type' => $targetType,
-                    'target' => $target,
                     'connection_type' => 'evolution_api',
+                    'phone' => $phone,
+                    'profile_name' => $profileName,
+                    'profile_pic' => $profilePic,
                 ],
             ]
         );
 
         return redirect()->route('social-accounts.index')
-            ->with('message', "WhatsApp '{$name}' connected successfully.");
+            ->with('message', "WhatsApp '{$name}' connected successfully. Pick a target (story / channel / group / user) when creating a post.");
+    }
+
+    /**
+     * Fetch WhatsApp targets (groups / channels / recent chats) for a
+     * connected Evolution API instance. Used by the per-post target picker
+     * in Posts/Create.vue and Posts/Edit.vue.
+     *
+     * POST /integrations/social/whatsapp-targets
+     * Body: { account_id: int, target_type: 'group'|'channel'|'user' }
+     * Returns: { targets: [{ id, name, picture, description }] }
+     */
+    public function fetchWhatsAppTargets(Request $request)
+    {
+        $validated = $request->validate([
+            'account_id' => 'required|exists:social_accounts,id',
+            'target_type' => 'required|string|in:group,channel,user',
+        ]);
+
+        $account = SocialAccount::findOrFail($validated['account_id']);
+
+        // Ownership check
+        if ($account->user_id !== $request->user()->id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        if ($account->provider !== 'whatsapp') {
+            return response()->json(['error' => 'Not a WhatsApp account'], 400);
+        }
+
+        $metadata = is_string($account->metadata) ? json_decode($account->metadata, true) : ($account->metadata ?? []);
+        $evoUrl = rtrim($metadata['evo_url'] ?? '', '/');
+        $instance = $metadata['instance'] ?? '';
+        $apiKey = $account->access_token;
+
+        if (!$evoUrl || !$instance || !$apiKey) {
+            return response()->json(['error' => 'WhatsApp Evolution API config missing. Re-connect the account.'], 400);
+        }
+
+        $targetType = $validated['target_type'];
+        $targets = [];
+
+        try {
+            $headers = ['apikey' => $apiKey];
+
+            if ($targetType === 'group') {
+                // GET /group/fetchAllGroups/{instance}?getParticipants=false
+                $resp = Http::withHeaders($headers)
+                    ->get("{$evoUrl}/group/fetchAllGroups/{$instance}", [
+                        'getParticipants' => 'false',
+                    ]);
+
+                if (!$resp->ok()) {
+                    return response()->json([
+                        'error' => "Evolution API error (HTTP {$resp->status()}): {$resp->body()}",
+                    ], 502);
+                }
+
+                $data = $resp->json();
+                // Response shape: array of groups (v2) or { groups: [...] } (older versions)
+                $groups = $data['groups'] ?? (is_array($data) ? $data : []);
+
+                foreach ($groups as $g) {
+                    $id = $g['id'] ?? null;
+                    if (!$id) continue;
+                    $pic = $g['subjectPic']['url'] ?? $g['picture']['url'] ?? $g['pictureUrl'] ?? null;
+                    $size = $g['size'] ?? ($g['participants'] ? count($g['participants']) : null);
+                    $desc = $size ? "{$size} participants" : null;
+                    $targets[] = [
+                        'id' => $id,
+                        'name' => $g['subject'] ?? $g['name'] ?? 'Untitled group',
+                        'picture' => $pic,
+                        'description' => $desc,
+                    ];
+                }
+            } elseif ($targetType === 'channel') {
+                // GET /newsletter/fetchAllNewsLetters/{instance}
+                $resp = Http::withHeaders($headers)
+                    ->get("{$evoUrl}/newsletter/fetchAllNewsLetters/{$instance}");
+
+                if (!$resp->ok()) {
+                    return response()->json([
+                        'error' => "Evolution API error (HTTP {$resp->status()}): {$resp->body()}",
+                    ], 502);
+                }
+
+                $data = $resp->json();
+                $channels = $data['newsletters'] ?? (is_array($data) ? $data : []);
+
+                foreach ($channels as $c) {
+                    $id = $c['id'] ?? null;
+                    if (!$id) continue;
+                    $pic = $c['picture']['url'] ?? $c['pictureUrl'] ?? null;
+                    $subscribers = $c['subscribers'] ?? $c['subscriberCount'] ?? null;
+                    $desc = $subscribers ? "{$subscribers} subscribers" : null;
+                    $targets[] = [
+                        'id' => $id,
+                        'name' => $c['name'] ?? $c['title'] ?? 'Untitled channel',
+                        'picture' => $pic,
+                        'description' => $desc,
+                    ];
+                }
+            } else {
+                // target_type === 'user' — fetch recent 1:1 chats
+                // GET /chat/fetchChats/{instance}
+                $resp = Http::withHeaders($headers)
+                    ->get("{$evoUrl}/chat/fetchChats/{$instance}");
+
+                if (!$resp->ok()) {
+                    return response()->json([
+                        'error' => "Evolution API error (HTTP {$resp->status()}): {$resp->body()}",
+                    ], 502);
+                }
+
+                $data = $resp->json();
+                $chats = $data['chats'] ?? (is_array($data) ? $data : []);
+
+                foreach ($chats as $c) {
+                    $id = $c['id'] ?? null;
+                    if (!$id) continue;
+                    // Only 1:1 chats (skip groups/channels)
+                    if (!str_ends_with($id, '@s.whatsapp.net')) continue;
+
+                    $name = $c['name'] ?? $c['pushName'] ?? $c['formattedName'] ?? null;
+                    if (!$name) continue; // skip chats without a name
+
+                    $pic = $c['profilePicUrl'] ?? $c['profilePictureUrl'] ?? null;
+                    $lastMsg = $c['lastMessage']['message']['conversation']
+                        ?? $c['lastMessage']['message']
+                        ?? null;
+                    $desc = $lastMsg ? mb_strimwidth($lastMsg, 0, 60, '…') : null;
+
+                    $targets[] = [
+                        'id' => $id,
+                        'name' => $name,
+                        'picture' => $pic,
+                        'description' => $desc,
+                        'phone' => str_replace('@s.whatsapp.net', '', $id),
+                    ];
+                }
+
+                // Sort by name (alphabetical) for easier scanning
+                usort($targets, fn($a, $b) => strcmp($a['name'], $b['name']));
+            }
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to fetch targets: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json(['targets' => $targets]);
     }
 
     /**

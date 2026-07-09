@@ -60,13 +60,40 @@ class WhatsAppPublisher implements PublisherInterface
             $evoUrl = rtrim($metadata['evo_url'] ?? '', '/');
             $instance = $metadata['instance'] ?? '';
             $apiKey = $account['access_token']; // API key stored as access_token
-            $targetType = $metadata['target_type'] ?? 'user';
-            $target = $metadata['target'] ?? '';
+
+            // Per-post target selection (chosen in Create Post page).
+            // Overrides are stored as { "accountId": { "target_type": "...", "target": "..." } }.
+            $accountId = (string) ($post['account_id'] ?? $account['id'] ?? '');
+            $overrides = $post['account_overrides'] ?? [];
+            $perPost = $overrides[$accountId] ?? [];
+
+            // Fallback to legacy account metadata (for any WhatsApp accounts
+            // connected before the per-post picker shipped)
+            $targetType = $perPost['target_type']
+                ?? $metadata['target_type']
+                ?? null;
+            $target = $perPost['target']
+                ?? $metadata['target']
+                ?? '';
 
             if (!$evoUrl || !$instance || !$apiKey) {
                 return [
                     'success' => false,
                     'error' => 'WhatsApp Evolution API config missing. Re-connect the account.',
+                ];
+            }
+
+            if (!$targetType || !in_array($targetType, ['user', 'group', 'channel', 'story'])) {
+                return [
+                    'success' => false,
+                    'error' => 'Pilih target (User / Group / Channel / Story) untuk akun WhatsApp ini di form post.',
+                ];
+            }
+
+            if ($targetType !== 'story' && empty($target)) {
+                return [
+                    'success' => false,
+                    'error' => "Target kosong untuk tipe '{$targetType}'. Pilih dari list atau ketik manual.",
                 ];
             }
 

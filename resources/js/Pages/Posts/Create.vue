@@ -33,6 +33,62 @@ const isBufferPinterest = (account) =>
 const isBufferInstagram = (account) =>
     account.provider === 'buffer' && account.metadata?.channel_service === 'instagram';
 
+const isWhatsApp = (account) => account.provider === 'whatsapp';
+
+// ===== WhatsApp per-account overrides (target_type + target) =====
+const waTargets = ref({}); // { accountId: [{ id, name, picture, description, phone? }] }
+const loadingWaTargetsFor = ref({});
+const waSearch = ref({}); // { accountId: 'search text' }
+
+const fetchWaTargets = async (accountId, targetType) => {
+    if (!targetType || targetType === 'story') return;
+    loadingWaTargetsFor.value[accountId] = true;
+    try {
+        const response = await fetch('/integrations/social/whatsapp-targets', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ account_id: accountId, target_type: targetType }),
+        });
+        const data = await response.json();
+        if (data.targets) {
+            waTargets.value[accountId] = data.targets;
+        } else if (data.error) {
+            console.error('Failed to fetch WA targets:', data.error);
+            waTargets.value[accountId] = [];
+        }
+    } catch (e) {
+        console.error('Failed to fetch WA targets:', e);
+        waTargets.value[accountId] = [];
+    } finally {
+        loadingWaTargetsFor.value[accountId] = false;
+    }
+};
+
+const setWaTarget = (accountId, targetType, target) => {
+    if (!form.account_overrides[accountId]) {
+        form.account_overrides[accountId] = {};
+    }
+    form.account_overrides[accountId].target_type = targetType;
+    form.account_overrides[accountId].target = target;
+};
+
+const filteredWaTargets = (accountId) => {
+    const all = waTargets.value[accountId] || [];
+    const q = (waSearch.value[accountId] || '').toLowerCase().trim();
+    if (!q) return all;
+    return all.filter(t =>
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.phone || '').toLowerCase().includes(q)
+    );
+};
+
 const fetchBoardsForAccount = async (accountId) => {
     loadingBoardsFor.value[accountId] = true;
     try {
@@ -83,6 +139,10 @@ const onAccountToggle = (accountId) => {
         // If Buffer Instagram, default to metadata value or 'post'
         if (isBufferInstagram(account)) {
             setOverride(accountId, 'instagram_post_type', account.metadata?.instagram_post_type || 'post');
+        }
+        // If WhatsApp, default to story target (no fetch needed)
+        if (isWhatsApp(account) && !form.account_overrides[accountId]?.target_type) {
+            setWaTarget(accountId, 'story', '');
         }
     } else {
         // Just unchecked — clean up override
@@ -617,6 +677,116 @@ const minDate = () => {
                                             class="text-pink-500 focus:ring-pink-400" />
                                         <span class="text-xs text-gray-700">Story</span>
                                     </label>
+                                </div>
+                            </div>
+
+                            <!-- WhatsApp target picker (inline) — User / Group / Channel / Story -->
+                            <div v-if="isWhatsApp(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-green-200 space-y-2">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">🎯 Target WhatsApp</label>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button type="button"
+                                        @click="setWaTarget(account.id, 'story', '')"
+                                        class="px-2 py-1 rounded border text-xs cursor-pointer"
+                                        :class="form.account_overrides[account.id]?.target_type === 'story' ? 'border-green-500 bg-green-100 text-green-800 font-semibold' : 'border-gray-300 text-gray-700 hover:bg-gray-50'">
+                                        📖 Story
+                                    </button>
+                                    <button type="button"
+                                        @click="setWaTarget(account.id, 'channel', ''); fetchWaTargets(account.id, 'channel')"
+                                        class="px-2 py-1 rounded border text-xs cursor-pointer"
+                                        :class="form.account_overrides[account.id]?.target_type === 'channel' ? 'border-green-500 bg-green-100 text-green-800 font-semibold' : 'border-gray-300 text-gray-700 hover:bg-gray-50'">
+                                        📢 Channel
+                                    </button>
+                                    <button type="button"
+                                        @click="setWaTarget(account.id, 'group', ''); fetchWaTargets(account.id, 'group')"
+                                        class="px-2 py-1 rounded border text-xs cursor-pointer"
+                                        :class="form.account_overrides[account.id]?.target_type === 'group' ? 'border-green-500 bg-green-100 text-green-800 font-semibold' : 'border-gray-300 text-gray-700 hover:bg-gray-50'">
+                                        👥 Group
+                                    </button>
+                                    <button type="button"
+                                        @click="setWaTarget(account.id, 'user', ''); fetchWaTargets(account.id, 'user')"
+                                        class="px-2 py-1 rounded border text-xs cursor-pointer"
+                                        :class="form.account_overrides[account.id]?.target_type === 'user' ? 'border-green-500 bg-green-100 text-green-800 font-semibold' : 'border-gray-300 text-gray-700 hover:bg-gray-50'">
+                                        👤 User
+                                    </button>
+                                </div>
+
+                                <!-- Story info -->
+                                <div v-if="form.account_overrides[account.id]?.target_type === 'story'"
+                                    class="text-xs text-gray-500 italic p-2 bg-green-50 rounded">
+                                    📖 Story akan diposting ke status WhatsApp kamu. Wajib attach media (image/video).
+                                </div>
+
+                                <!-- Group/Channel/User target list with pictures -->
+                                <div v-else-if="['group','channel','user'].includes(form.account_overrides[account.id]?.target_type)"
+                                    class="space-y-2">
+                                    <!-- Search box -->
+                                    <input type="text" v-model="waSearch[account.id]"
+                                        placeholder="🔍 Cari nama…"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-green-500 focus:ring-green-500" />
+
+                                    <!-- Loading -->
+                                    <div v-if="loadingWaTargetsFor[account.id]" class="text-xs text-gray-400 flex items-center gap-2 py-2">
+                                        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                        </svg>
+                                        Memuat list dari Evolution API…
+                                    </div>
+
+                                    <!-- Target list with pictures -->
+                                    <div v-else-if="waTargets[account.id]?.length > 0"
+                                        class="max-h-56 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
+                                        <button v-for="t in filteredWaTargets(account.id)" :key="t.id"
+                                            type="button"
+                                            @click="setWaTarget(account.id, form.account_overrides[account.id]?.target_type, t.id)"
+                                            class="w-full flex items-center gap-2 p-2 hover:bg-green-50 text-left"
+                                            :class="form.account_overrides[account.id]?.target === t.id ? 'bg-green-100' : ''">
+                                            <img v-if="t.picture" :src="t.picture"
+                                                class="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                @error="$event.target.style.display='none'" />
+                                            <div v-else class="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                                {{ (t.name || '?').charAt(0).toUpperCase() }}
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <p class="text-xs font-medium text-gray-900 truncate">{{ t.name }}</p>
+                                                <p v-if="t.description" class="text-[10px] text-gray-500 truncate">{{ t.description }}</p>
+                                                <p v-if="t.phone" class="text-[10px] text-gray-400 font-mono truncate">{{ t.phone }}</p>
+                                            </div>
+                                            <svg v-if="form.account_overrides[account.id]?.target === t.id" class="w-4 h-4 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    <!-- Empty state -->
+                                    <p v-else class="text-xs text-gray-400 italic">Tidak ada target ditemukan.</p>
+
+                                    <!-- Manual input for User (phone number) -->
+                                    <div v-if="form.account_overrides[account.id]?.target_type === 'user'" class="mt-1">
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5">Atau ketik nomor manual:</label>
+                                        <input type="text"
+                                            :value="form.account_overrides[account.id]?.target || ''"
+                                            @input="setWaTarget(account.id, 'user', $event.target.value)"
+                                            placeholder="6281234567890 (format internasional tanpa +)"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs font-mono focus:border-green-500 focus:ring-green-500" />
+                                    </div>
+
+                                    <!-- Manual input for Group/Channel (JID) -->
+                                    <div v-if="['group','channel'].includes(form.account_overrides[account.id]?.target_type)" class="mt-1">
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5">Atau ketik JID manual:</label>
+                                        <input type="text"
+                                            :value="form.account_overrides[account.id]?.target || ''"
+                                            @input="setWaTarget(account.id, form.account_overrides[account.id]?.target_type, $event.target.value)"
+                                            :placeholder="form.account_overrides[account.id]?.target_type === 'group' ? '120363xxx@g.us' : '120363xxx@newsletter'"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs font-mono focus:border-green-500 focus:ring-green-500" />
+                                    </div>
+
+                                    <!-- Selected target display -->
+                                    <div v-if="form.account_overrides[account.id]?.target" class="text-xs text-green-700 flex items-center gap-1">
+                                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                        <span>Target: <code class="font-mono text-[10px] bg-green-50 px-1 rounded">{{ form.account_overrides[account.id]?.target }}</code></span>
+                                    </div>
                                 </div>
                             </div>
                         </label>
