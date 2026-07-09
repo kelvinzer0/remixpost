@@ -128,6 +128,41 @@ class TelegramPublisher implements PublisherInterface
             $ext = MediaType::extension($mediaUrl) ?: 'bin';
             $filename = 'media.' . $ext;
 
+            // For images: check dimensions — Telegram limit is max 10000px
+            // for width+height combined. If image is too large, resize it
+            // using GD before uploading.
+            if ($type === 'image' && function_exists('imagecreatefromstring')) {
+                $image = @imagecreatefromstring($mediaData);
+                if ($image !== false) {
+                    $origW = imagesx($image);
+                    $origH = imagesy($image);
+
+                    // Telegram limit: width+height <= 10000, max dimension <= 10000
+                    if ($origW + $origH > 10000 || $origW > 10000 || $origH > 10000) {
+                        // Scale down so width+height <= 9000 (safety margin)
+                        $scale = 9000 / ($origW + $origH);
+                        $newW = (int)($origW * $scale);
+                        $newH = (int)($origH * $scale);
+
+                        $resized = imagecreatetruecolor($newW, $newH);
+                        imagecopyresampled($resized, $image, 0, 0, 0, 0, $newW, $newH, $origW, $origH);
+                        imagedestroy($image);
+
+                        // Save resized to temp
+                        $tempPath = tempnam(sys_get_temp_dir(), 'tg_img_') . '.jpg';
+                        imagejpeg($resized, $tempPath, 85);
+                        imagedestroy($resized);
+
+                        $mediaData = file_get_contents($tempPath);
+                        $mediaMime = 'image/jpeg';
+                        $filename = 'media.jpg';
+                        @unlink($tempPath);
+                    } else {
+                        imagedestroy($image);
+                    }
+                }
+            }
+
             $multipart = [
                 ['name' => 'chat_id', 'contents' => $params['chat_id']],
                 ['name' => 'caption', 'contents' => $params['caption'] ?? ''],
