@@ -1870,39 +1870,115 @@ class SocialAccountController extends Controller
         $profilePic = null;
 
         try {
+            // Try fetching with the EXACT instance name the user provided.
+            // Evolution API v2's instanceName filter is CASE-SENSITIVE —
+            // "hobi haus" returns 404 even if "Hobi Haus" exists.
             $response = Http::withHeaders(['apikey' => $apiKey])
                 ->get("{$evoUrl}/instance/fetchInstances", [
                     'instanceName' => $instance,
                 ]);
 
-            if (!$response->ok()) {
-                return back()->with('error', "Failed to connect to Evolution API (HTTP {$response->status()}): {$response->body()}");
+            $instances = [];
+            if ($response->ok()) {
+                $body = $response->json();
+                $instances = is_array($body)
+                    ? (isset($body[0]) ? $body : [$body])
+                    : [];
+            } elseif ($response->status() === 404) {
+                // Case-sensitivity fallback: fetch ALL instances and find
+                // one whose name matches case-insensitively. This prevents
+                // the user from being stuck when they typed different casing
+                // than what was created in the Evolution API dashboard.
+                $allResp = Http::withHeaders(['apikey' => $apiKey])
+                    ->get("{$evoUrl}/instance/fetchInstances");
+                if ($allResp->ok()) {
+                    $allBody = $allResp->json();
+                    $allInstances = is_array($allBody)
+                        ? (isset($allBody[0]) ? $allBody : [$allBody])
+                        : [];
+                    foreach ($allInstances as $cand) {
+                        if (strcasecmp($cand['name'] ?? '', $instance) === 0) {
+                            $instances = [$cand];
+                            // Normalize the instance name to the actual casing
+                            // stored in Evolution API — saves future API calls
+                            // from failing on case mismatch.
+                            $instance = $cand['name'];
+                            break;
+                        }
+                    }
+                    if (empty($instances)) {
+                        $available = array_map(fn($i) => $i['name'] ?? '?', $allInstances);
+                        return back()->with('error', "Instance '{$instance}' not found. Available instances: " . implode(', ', $available))->withInput();
+                    }
+                } else {
+                    return back()->with('error', "Failed to list Evolution API instances (HTTP {$allResp->status()}): {$allResp->body()}")->withInput();
+                }
+            } else {
+                return back()->with('error', "Failed to connect to Evolution API (HTTP {$response->status()}): {$response->body()}")->withInput();
             }
 
-            $instances = $response->json();
-            $instanceData = is_array($instances) && isset($instances[0]) ? $instances[0] : $instances;
-
-            // Check if instance is connected to WhatsApp
-            $state = $instanceData['instance']['state'] ?? ($instanceData['state'] ?? 'unknown');
-            if ($state !== 'open' && $state !== 'connected') {
-                return back()->with('error', "Evolution API instance '{$instance}' is not connected to WhatsApp (state: {$state}). Scan QR code in Evolution API dashboard first.");
+            if (empty($instances)) {
+                return back()->with('error', "Instance '{$instance}' returned empty response from Evolution API.")->withInput();
             }
 
-            // Extract profile info for nicer display in Connected Accounts
-            $phone = $instanceData['instance']['ownerJid']
-                ?? $instanceData['instance']['wuid']
-                ?? $instanceData['ownerJid']
-                ?? null;
-            $profileName = $instanceData['instance']['profileName']
-                ?? $instanceData['instance']['name']
-                ?? $instanceData['profileName']
-                ?? null;
-            $profilePic = $instanceData['instance']['profilePictureUrl']
-                ?? $instanceData['instance']['profilePicUrl']
-                ?? $instanceData['profilePictureUrl']
-                ?? null;
+            $instanceData = $instances[0];
+
+            // Connection state — Evolution API v2 uses `connectionStatus` (top-level
+            // field with values "open"/"close"), older versions use `state` (top-level
+            // or nested under `instance`). Accept any of these shapes.
+            $state = $instanceData['connectionStatus']
+                ?? ($instanceData['instance']['state']
+                ?? ($instanceData['instance']['connectionStatus']
+                ?? ($instanceData['state']
+                ?? 'unknown')));
+
+            // Normalize: Evolution API v2 uses "open"/"close" (lowercase);
+            // some versions use "connected". Treat "open" and "connected" as good.
+            $stateLower = strtolower((string) $state);
+            if (!in_array($stateLower, ['open', 'connected'], true)) {
+                // If fetchInstances reports a stale state, double-check via the
+                // dedicated /instance/connectionState/{instance} endpoint which
+                // returns the live state.
+                $liveState = null;
+                try {
+                    $liveResp = Http::withHeaders(['apikey' => $apiKey])
+                        ->get("{$evoUrl}/instance/connectionState/{$instance}");
+                    if ($liveResp->ok()) {
+                        $liveBody = $liveResp->json();
+                        $liveState = $liveBody['instance']['state']
+                            ?? ($liveBody['state']
+                            ?? null);
+                    }
+                } catch (\Exception $liveE) {
+                    // swallow — fall through to the error below
+                }
+                if ($liveState && in_array(strtolower($liveState), ['open', 'connected'], true)) {
+                    $state = $liveState;
+                } else {
+                    $state = $liveState ?? $state;
+                    return back()->with('error', "Evolution API instance '{$instance}' is not connected to WhatsApp (state: {$state}). Scan QR code in Evolution API dashboard first.")->withInput();
+                }
+            }
+
+            // Extract profile info for nicer display in Connected Accounts.
+            // Evolution API v2 puts these at the top level; older versions
+            // nest them under `instance`.
+            $phone = $instanceData['ownerJid']
+                ?? ($instanceData['instance']['ownerJid']
+                ?? ($instanceData['instance']['wuid']
+                ?? ($instanceData['number']
+                ?? null)));
+            $profileName = $instanceData['profileName']
+                ?? ($instanceData['instance']['profileName']
+                ?? ($instanceData['instance']['name']
+                ?? null));
+            $profilePic = $instanceData['profilePicUrl']
+                ?? ($instanceData['instance']['profilePicUrl']
+                ?? ($instanceData['instance']['profilePictureUrl']
+                ?? ($instanceData['profilePictureUrl']
+                ?? null)));
         } catch (\Exception $e) {
-            return back()->with('error', 'Cannot reach Evolution API: ' . $e->getMessage());
+            return back()->with('error', 'Cannot reach Evolution API: ' . $e->getMessage())->withInput();
         }
 
         // Build display name — prefer user-provided, then profile name, then phone
