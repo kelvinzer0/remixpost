@@ -48,9 +48,20 @@ class PublishPostJob implements ShouldQueue
         try {
             $publisher = PublisherFactory::make($account->provider);
 
+            // Compress media if it exceeds this platform's max size limit.
+            // This prevents "file too large" errors (e.g. Telegram 5MB image limit,
+            // Discord 25MB attachment limit) by auto-compressing before publish.
+            $mediaUrls = $post->media_urls ?? [];
+            $platformReq = \App\Services\PlatformRequirements::for($account->provider);
+            $maxSizeMb = $platformReq['max_media_size_mb'] ?? null;
+
+            if ($maxSizeMb && !empty($mediaUrls)) {
+                $mediaUrls = \App\Services\MediaCompressionService::compressIfNeeded($mediaUrls, $maxSizeMb);
+            }
+
             $result = $publisher->publish([
                 'content' => $post->content,
-                'media_urls' => $post->media_urls ?? [],
+                'media_urls' => $mediaUrls,
                 'tags' => $post->tags ?? [],
                 'first_comment' => $post->first_comment,
                 'alt_text' => $post->alt_text,
