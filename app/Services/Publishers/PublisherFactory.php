@@ -21,6 +21,7 @@ class PublisherFactory
             'email' => new EmailPublisher(),
             'discord' => new DiscordPublisher(),
             'buffer' => new BufferPublisher(),
+            'whatsapp' => new WhatsAppPublisher(),
             default => throw new InvalidArgumentException("Unknown provider: {$provider}"),
         };
     }

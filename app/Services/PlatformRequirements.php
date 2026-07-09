@@ -218,9 +218,25 @@ class PlatformRequirements
                 'supports_tags' => true,
                 'supports_first_comment' => true,
                 'max_content_length' => null,
-                'max_media_size_mb' => null, // Buffer routes to underlying platform
+                'max_media_size_mb' => null,
                 'max_media_count' => 10,
                 'notes' => 'Aggregator — routes to Buffer channel. Tags + first comment sent via Buffer metadata. Media must be public HTTPS URL.',
+            ],
+            'whatsapp' => [
+                'label' => 'WhatsApp',
+                'color' => 'bg-green-600',
+                'requires_media' => false,
+                'media_type' => null,
+                'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
+                'supports_pdf' => true,
+                'supports_tags' => true,
+                'supports_first_comment' => false,
+                'max_content_length' => 65536,
+                'max_media_size_mb' => 64,
+                'max_media_count' => 1,
+                'notes' => 'Via Evolution API (Baileys). Send to user (phone), group, channel, or story. Text-only OK. Story requires media.',
             ],
         ];
     }

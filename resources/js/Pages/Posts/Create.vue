@@ -306,6 +306,7 @@ const providerFallback = {
     email: { label: 'Email', color: 'bg-gray-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
     discord: { label: 'Discord', color: 'bg-indigo-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
     buffer: { label: 'Buffer', color: 'bg-blue-900', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    whatsapp: { label: 'WhatsApp', color: 'bg-green-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
 };
 
 const getReq = (provider) => platformRequirements.value[provider] || providerFallback[provider] || { label: provider, color: 'bg-gray-500' };

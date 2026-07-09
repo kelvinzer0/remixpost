@@ -1836,6 +1836,104 @@ class SocialAccountController extends Controller
     }
 
     /**
+     * Connect a WhatsApp account via Evolution API (Baileys).
+     *
+     * User provides:
+     *   - Evolution API URL (e.g. http://evolution_api:8080)
+     *   - Instance name (created in Evolution API dashboard)
+     *   - API key (from Evolution API instance settings)
+     *   - Target type: user (phone), group (JID), channel (JID), or story
+     *   - Target: phone number, group JID, channel JID, or null for story
+     *   - Display name (optional)
+     */
+    public function connectWhatsApp(Request $request)
+    {
+        $validated = $request->validate([
+            'evo_url' => 'required|string|url|max:500',
+            'instance' => 'required|string|max:100',
+            'api_key' => 'required|string|max:200',
+            'target_type' => 'required|string|in:user,group,channel,story',
+            'target' => 'nullable|string|max:200',
+            'display_name' => 'nullable|string|max:100',
+        ]);
+
+        $evoUrl = rtrim($validated['evo_url'], '/');
+        $instance = $validated['instance'];
+        $apiKey = $validated['api_key'];
+        $targetType = $validated['target_type'];
+        $target = $validated['target'] ?? '';
+        $displayName = $validated['display_name'] ?? '';
+
+        // Validate: story doesn't need target, others do
+        if ($targetType !== 'story' && empty($target)) {
+            return back()->with('error', "Target is required for type '{$targetType}'.");
+        }
+
+        // Validate connection by calling Evolution API instance info
+        try {
+            $response = Http::withHeaders(['apikey' => $apiKey])
+                ->get("{$evoUrl}/instance/fetchInstances", [
+                    'instanceName' => $instance,
+                ]);
+
+            if (!$response->ok()) {
+                return back()->with('error', "Failed to connect to Evolution API (HTTP {$response->status()}): {$response->body()}");
+            }
+
+            $instances = $response->json();
+            $instanceData = is_array($instances) && isset($instances[0]) ? $instances[0] : $instances;
+
+            // Check if instance is connected to WhatsApp
+            $state = $instanceData['instance']['state'] ?? ($instanceData['state'] ?? 'unknown');
+            if ($state !== 'open' && $state !== 'connected') {
+                return back()->with('error', "Evolution API instance '{$instance}' is not connected to WhatsApp (state: {$state}). Scan QR code in Evolution API dashboard first.");
+            }
+        } catch (\Exception $e) {
+            return back()->with('error', 'Cannot reach Evolution API: ' . $e->getMessage());
+        }
+
+        // Build display name
+        $targetLabel = match ($targetType) {
+            'user' => "WA: {$target}",
+            'group' => "WA Group: " . substr($target, 0, 30),
+            'channel' => "WA Channel: " . substr($target, 0, 30),
+            'story' => "WA Story",
+            default => "WhatsApp",
+        };
+        $name = trim($displayName) ?: $targetLabel;
+
+        // provider_id = unique key combining instance + target_type + target
+        $providerId = "{$instance}:{$targetType}:{$target}";
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'whatsapp',
+                'provider_id' => $providerId,
+            ],
+            [
+                'user_id' => $request->user()->id,
+                'name' => $name,
+                'username' => $targetLabel,
+                'avatar' => null,
+                'access_token' => $apiKey, // API key stored as access_token
+                'refresh_token' => null,
+                'expires_at' => null, // API key doesn't expire
+                'is_active' => true,
+                'metadata' => [
+                    'evo_url' => $evoUrl,
+                    'instance' => $instance,
+                    'target_type' => $targetType,
+                    'target' => $target,
+                    'connection_type' => 'evolution_api',
+                ],
+            ]
+        );
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "WhatsApp '{$name}' connected successfully.");
+    }
+
+    /**
      * Fetch Pinterest boards for a Buffer channel via GraphQL.
      * Called by frontend when user selects a Pinterest channel during Buffer connect.
      *

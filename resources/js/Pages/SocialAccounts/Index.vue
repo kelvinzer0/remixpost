@@ -17,6 +17,7 @@ const providers = [
     { id: 'email', name: 'Email Newsletter', color: 'bg-gray-600', icon: '✉', oauth: false },
     { id: 'discord', name: 'Discord Channel', color: 'bg-indigo-600', icon: '🎮', oauth: false },
     { id: 'buffer', name: 'Buffer (Aggregator)', color: 'bg-blue-900', icon: 'B', oauth: false },
+    { id: 'whatsapp', name: 'WhatsApp (Evo API)', color: 'bg-green-600', icon: '💬', oauth: false },
 ];
 
 // Telegram manual connect form
@@ -74,6 +75,22 @@ const connectBuffer = () => {
     });
 };
 
+// WhatsApp connect — via Evolution API (Baileys)
+const whatsappForm = useForm({
+    evo_url: 'http://evolution_api:8080',
+    instance: '',
+    api_key: '',
+    target_type: 'user',
+    target: '',
+    display_name: '',
+});
+
+const connectWhatsApp = () => {
+    whatsappForm.post('/integrations/social/connect-whatsapp', {
+        onSuccess: () => whatsappForm.reset(),
+    });
+};
+
 const oauthProviders = providers.filter(p => p.oauth);
 const manualProviders = providers.filter(p => !p.oauth);
 </script>
@@ -109,6 +126,7 @@ const manualProviders = providers.filter(p => !p.oauth);
                                     'bg-pink-500': account.provider === 'instagram',
                                     'bg-indigo-600': account.provider === 'discord',
                                     'bg-blue-900': account.provider === 'buffer',
+                                    'bg-green-600': account.provider === 'whatsapp',
                                 }">
                                 {{ account.provider.charAt(0).toUpperCase() }}
                             </div>
@@ -345,6 +363,80 @@ const manualProviders = providers.filter(p => !p.oauth);
                         <button type="submit" :disabled="bufferForm.processing"
                             class="w-full py-2 text-xs font-medium text-center text-white bg-blue-900 rounded-md hover:bg-blue-800 disabled:opacity-50">
                             {{ bufferForm.processing ? 'Connecting...' : 'Connect via Buffer' }}
+                        </button>
+                    </form>
+                </div>
+
+                <!-- WhatsApp -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <div class="flex items-center mb-4">
+                        <div class="flex items-center justify-center w-10 h-10 rounded-full text-white text-lg font-bold bg-green-600">
+                            💬
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-gray-900">WhatsApp (Evo API)</p>
+                            <p class="text-xs text-gray-500">Via Evolution API (Baileys) — user, group, channel, story</p>
+                        </div>
+                    </div>
+                    <div class="mb-3 p-2 bg-green-50 border border-green-200 rounded text-xs text-green-800">
+                        <p class="font-medium mb-1">Setup:</p>
+                        <ol class="list-decimal ml-4 space-y-0.5">
+                            <li>Buka Evolution API dashboard → buat instance → scan QR WhatsApp</li>
+                            <li>Catik Instance Name + API Key</li>
+                            <li>Isi form di bawah → Connect</li>
+                        </ol>
+                    </div>
+                    <form @submit.prevent="connectWhatsApp" class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Evolution API URL</label>
+                            <input v-model="whatsappForm.evo_url" type="url" required
+                                placeholder="http://evolution_api:8080"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm font-mono" />
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700">Instance Name</label>
+                                <input v-model="whatsappForm.instance" type="text" required
+                                    placeholder="my-instance"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700">API Key</label>
+                                <input v-model="whatsappForm.api_key" type="text" required
+                                    placeholder="evo-api-key-xxx"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm font-mono" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700">Target Type</label>
+                                <select v-model="whatsappForm.target_type"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm">
+                                    <option value="user">User (phone number)</option>
+                                    <option value="group">Group (JID)</option>
+                                    <option value="channel">Channel (JID)</option>
+                                    <option value="story">Story / Status</option>
+                                </select>
+                            </div>
+                            <div v-if="whatsappForm.target_type !== 'story'">
+                                <label class="block text-xs font-medium text-gray-700">Target</label>
+                                <input v-model="whatsappForm.target" type="text"
+                                    :placeholder="whatsappForm.target_type === 'user' ? '6281234567890' : '120363xxx@g.us'"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm font-mono" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Display Name (opsional)</label>
+                            <input v-model="whatsappForm.display_name" type="text"
+                                placeholder="Customer Support WA"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm" />
+                        </div>
+                        <p v-if="whatsappForm.errors.evo_url" class="text-xs text-red-600">{{ whatsappForm.errors.evo_url }}</p>
+                        <p v-if="whatsappForm.errors.instance" class="text-xs text-red-600">{{ whatsappForm.errors.instance }}</p>
+                        <p v-if="whatsappForm.errors.api_key" class="text-xs text-red-600">{{ whatsappForm.errors.api_key }}</p>
+                        <button type="submit" :disabled="whatsappForm.processing"
+                            class="w-full py-2 text-xs font-medium text-center text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50">
+                            {{ whatsappForm.processing ? 'Validating...' : 'Connect WhatsApp' }}
                         </button>
                     </form>
                 </div>
