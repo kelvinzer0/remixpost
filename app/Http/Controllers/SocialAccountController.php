@@ -1780,8 +1780,11 @@ class SocialAccountController extends Controller
 
             $service = $ch['service'] ?? 'unknown';
             $displayName = $ch['displayName'] ?? $ch['name'] ?? "Buffer {$service}";
+            $name = "{$displayName} (Buffer → {$service})";
 
-            // Build metadata — include per-channel config
+            // Metadata stores channel info. Pinterest board, IG mode, Pin Title,
+            // and Destination Link are NOT stored here — they're picked per-post
+            // via account_overrides in the Create Post page.
             $metadata = [
                 'channel_id' => $channelId,
                 'channel_service' => $service,
@@ -1791,36 +1794,10 @@ class SocialAccountController extends Controller
                 'buffer_account_email' => $account['email'] ?? null,
             ];
 
-            // Build provider_id with optional suffix for Pinterest/Instagram
-            // so user can connect same channel multiple times with different
-            // board/mode (same pattern as YouTube :video/:short suffix).
-            $providerId = $channelId;
-            $displayNameWithConfig = $displayName;
-
-            if ($service === 'pinterest' && !empty($channelConfigs[$channelId]['pinterest_board_id'])) {
-                $boardId = $channelConfigs[$channelId]['pinterest_board_id'];
-                $metadata['pinterest_board_id'] = $boardId;
-                $providerId = $channelId . ':board:' . $boardId;
-                // Try to find board name from the config fetched in session
-                $boards = session('buffer_pinterest_boards_' . $channelId, []);
-                $boardName = collect($boards)->firstWhere('serviceId', $boardId)['name'] ?? $boardId;
-                $displayNameWithConfig = "{$displayName} (Board: {$boardName})";
-            }
-
-            if ($service === 'instagram' && !empty($channelConfigs[$channelId]['instagram_post_type'])) {
-                $postType = $channelConfigs[$channelId]['instagram_post_type'];
-                $metadata['instagram_post_type'] = $postType;
-                $providerId = $channelId . ':' . $postType;
-                $modeLabel = ucfirst($postType);
-                $displayNameWithConfig = "{$displayName} ({$modeLabel})";
-            }
-
-            $name = "{$displayNameWithConfig} (Buffer → {$service})";
-
             SocialAccount::updateOrCreate(
                 [
                     'provider' => 'buffer',
-                    'provider_id' => $providerId,
+                    'provider_id' => $channelId,
                 ],
                 [
                     'user_id' => $userId,
