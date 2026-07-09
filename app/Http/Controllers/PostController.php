@@ -248,4 +248,106 @@ class PostController extends Controller
         return redirect()->route('posts.edit', $clone->id)
             ->with('message', 'Post duplicated. Edit and schedule when ready.');
     }
+
+    /**
+     * Auto-save a post as draft. Called by frontend via AJAX every few seconds.
+     *
+     * If post_id is provided → update existing draft.
+     * If no post_id → create new draft, return ID so frontend can update in-place.
+     *
+     * Returns JSON (not redirect) so frontend can stay on page.
+     */
+    public function autoSave(Request $request, $id = null)
+    {
+        $validated = $request->validate([
+            'content' => ['nullable', 'string', 'max:5000'],
+            'media_urls' => ['nullable', 'array', 'max:10'],
+            'media_urls.*' => ['url'],
+            'tags' => ['nullable', 'array', 'max:30'],
+            'tags.*' => ['string', 'max:100'],
+            'first_comment' => ['nullable', 'string', 'max:8000'],
+            'alt_text' => ['nullable', 'string', 'max:1000'],
+            'account_overrides' => ['nullable', 'array'],
+            'account_ids' => ['nullable', 'array'],
+            'account_ids.*' => ['exists:social_accounts,id'],
+            'scheduled_at' => ['nullable', 'string'],
+        ]);
+
+        // Strip tagInput if present (UI helper field)
+        unset($validated['tagInput']);
+
+        // Parse scheduled_at if provided
+        $scheduledAt = null;
+        if (!empty($validated['scheduled_at'])) {
+            try {
+                $scheduledAt = \Carbon\Carbon::parse($validated['scheduled_at'], config('app.timezone'));
+            } catch (\Exception $e) {
+                $scheduledAt = null;
+            }
+        }
+
+        if ($id) {
+            // Update existing post
+            $post = $request->user()->posts()->findOrFail($id);
+
+            // Only auto-save if post is still draft or scheduled (not published/failed)
+            if (!in_array($post->status, [Post::STATUS_DRAFT, Post::STATUS_SCHEDULED])) {
+                return response()->json(['error' => 'Cannot auto-save a published post'], 400);
+            }
+
+            $post->update([
+                'content' => $validated['content'] ?? $post->content,
+                'media_urls' => $validated['media_urls'] ?? $post->media_urls,
+                'tags' => $validated['tags'] ?? $post->tags,
+                'first_comment' => $validated['first_comment'] ?? $post->first_comment,
+                'alt_text' => $validated['alt_text'] ?? $post->alt_text,
+                'account_overrides' => $validated['account_overrides'] ?? $post->account_overrides,
+                'scheduled_at' => $scheduledAt ?? $post->scheduled_at,
+                'status' => Post::STATUS_DRAFT,
+            ]);
+
+            // Sync accounts if provided
+            if (!empty($validated['account_ids'])) {
+                $accountIds = $request->user()
+                    ->socialAccounts()
+                    ->whereIn('id', $validated['account_ids'])
+                    ->pluck('id');
+                $post->socialAccounts()->sync($accountIds);
+            }
+
+            return response()->json([
+                'success' => true,
+                'post_id' => $post->id,
+                'saved_at' => now()->format('H:i:s'),
+            ]);
+        } else {
+            // Create new draft
+            $post = $request->user()->posts()->create([
+                'content' => $validated['content'] ?? '',
+                'media_urls' => $validated['media_urls'] ?? [],
+                'tags' => $validated['tags'] ?? [],
+                'first_comment' => $validated['first_comment'] ?? null,
+                'alt_text' => $validated['alt_text'] ?? null,
+                'account_overrides' => $validated['account_overrides'] ?? null,
+                'scheduled_at' => $scheduledAt,
+                'status' => Post::STATUS_DRAFT,
+            ]);
+
+            // Sync accounts if provided
+            if (!empty($validated['account_ids'])) {
+                $accountIds = $request->user()
+                    ->socialAccounts()
+                    ->whereIn('id', $validated['account_ids'])
+                    ->pluck('id');
+                $post->socialAccounts()->sync($accountIds);
+            }
+
+            return response()->json([
+                'success' => true,
+                'post_id' => $post->id,
+                'saved_at' => now()->format('H:i:s'),
+                'redirect' => route('posts.edit', $post->id),
+            ]);
+        }
+    }
 }

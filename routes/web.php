@@ -68,6 +68,8 @@ Route::middleware('auth')->group(function () {
 
     Route::resource('posts', PostController::class);
     Route::post('/posts/{id}/duplicate', [PostController::class, 'duplicate'])->name('posts.duplicate');
+    Route::post('/posts/auto-save', [PostController::class, 'autoSave'])->name('posts.auto-save');
+    Route::post('/posts/{id}/auto-save', [PostController::class, 'autoSave'])->name('posts.auto-save-existing');
 
     Route::get('/media', [\App\Http\Controllers\MediaController::class, 'index'])->name('media.index');
     Route::post('/media', [\App\Http\Controllers\MediaController::class, 'store'])->name('media.store');

@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onUnmounted } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
@@ -100,6 +100,70 @@ props.accounts.forEach(account => {
     if (isBufferPinterest(account) && form.account_ids.includes(account.id)) {
         fetchBoardsForAccount(account.id);
     }
+});
+
+// ===== Auto-save (Draft) =====
+const autoSaveStatus = ref('');
+const autoSaveTimer = ref(null);
+const isSubmitting = ref(false);
+
+const triggerAutoSave = () => {
+    if (isSubmitting.value) return;
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
+    autoSaveTimer.value = setTimeout(doAutoSave, 3000);
+};
+
+const doAutoSave = async () => {
+    if (!form.content.trim() && form.account_ids.length === 0) return;
+
+    autoSaveStatus.value = 'saving...';
+
+    try {
+        const data = {
+            content: form.content,
+            media_urls: form.media_urls,
+            tags: form.tags,
+            first_comment: form.first_comment,
+            alt_text: form.alt_text,
+            account_overrides: form.account_overrides,
+            account_ids: form.account_ids,
+            scheduled_at: form.scheduled_at || null,
+        };
+
+        const response = await fetch(`/posts/${props.post.id}/auto-save`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify(data),
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            autoSaveStatus.value = `Draft tersimpan · ${result.saved_at}`;
+        } else {
+            autoSaveStatus.value = 'Gagal auto-save';
+        }
+    } catch (e) {
+        autoSaveStatus.value = 'Gagal auto-save';
+    }
+};
+
+watch([
+    () => form.content,
+    () => form.media_urls,
+    () => form.tags,
+    () => form.first_comment,
+    () => form.account_ids,
+    () => form.scheduled_at,
+], triggerAutoSave, { deep: true });
+
+onUnmounted(() => {
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
 });
 
 const providerFallback = {
@@ -215,6 +279,8 @@ const canSubmit = computed(() =>
 
 const submit = () => {
     if (!canSubmit.value) return;
+    isSubmitting.value = true;
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
     const data = form.data();
     delete data.tagInput;
     // Clean up empty overrides
@@ -517,15 +583,28 @@ const supportsTags = computed(() => {
                 </div>
 
                 <!-- Actions -->
-                <div class="flex items-center justify-end space-x-3">
-                    <Link :href="`/posts/${post.id}`"
-                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                        Cancel
-                    </Link>
-                    <button type="submit" :disabled="!canSubmit"
-                        class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                        Update Post
-                    </button>
+                <div class="flex items-center justify-between">
+                    <p v-if="autoSaveStatus" class="text-xs text-gray-400 flex items-center gap-1">
+                        <svg v-if="autoSaveStatus === 'saving...'" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                        <svg v-else class="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                        {{ autoSaveStatus }}
+                    </p>
+                    <div v-else></div>
+                    <div class="flex items-center space-x-3">
+                        <Link :href="`/posts/${post.id}`"
+                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                            Cancel
+                        </Link>
+                        <button type="submit" :disabled="!canSubmit"
+                            class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Update Post
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>

@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
@@ -98,6 +98,86 @@ const aiCaptions = ref([]);
 const aiTone = ref('casual');
 const aiCount = ref(3);
 const aiContextPreview = ref('');
+
+// ===== Auto-save (Draft) =====
+const autoSaveStatus = ref(''); // '', 'saving...', 'saved at HH:MM:SS', 'error'
+const autoSavePostId = ref(null); // once created, track post ID for updates
+const autoSaveTimer = ref(null);
+const isSubmitting = ref(false); // prevent auto-save when manually submitting
+
+const triggerAutoSave = () => {
+    if (isSubmitting.value) return;
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
+    autoSaveTimer.value = setTimeout(doAutoSave, 3000); // 3s debounce
+};
+
+const doAutoSave = async () => {
+    // Don't auto-save if form is empty (no content, no accounts, no media)
+    if (!form.content.trim() && form.account_ids.length === 0 && form.media_urls.length === 0) {
+        return;
+    }
+
+    autoSaveStatus.value = 'saving...';
+
+    try {
+        const data = {
+            content: form.content,
+            media_urls: form.media_urls,
+            tags: form.tags,
+            first_comment: form.first_comment,
+            alt_text: form.alt_text,
+            account_overrides: form.account_overrides,
+            account_ids: form.account_ids,
+            scheduled_at: form.scheduled_at || null,
+        };
+
+        const url = autoSavePostId.value
+            ? `/posts/${autoSavePostId.value}/auto-save`
+            : '/posts/auto-save';
+
+        const response = await fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify(data),
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            autoSaveStatus.value = `Draft tersimpan · ${result.saved_at}`;
+            // If this was a new draft (no post ID yet), switch URL to edit page
+            if (!autoSavePostId.value && result.post_id) {
+                autoSavePostId.value = result.post_id;
+                // Update browser URL without reload
+                window.history.replaceState({}, '', `/posts/${result.post_id}/edit`);
+            }
+        } else {
+            autoSaveStatus.value = 'Gagal auto-save';
+        }
+    } catch (e) {
+        autoSaveStatus.value = 'Gagal auto-save';
+    }
+};
+
+// Watch form fields for changes → trigger auto-save
+watch([
+    () => form.content,
+    () => form.media_urls,
+    () => form.tags,
+    () => form.first_comment,
+    () => form.account_ids,
+    () => form.scheduled_at,
+], triggerAutoSave, { deep: true });
+
+onUnmounted(() => {
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
+});
 
 const tones = [
     { value: 'casual', label: '😊 Santai (Casual)' },
@@ -339,6 +419,8 @@ const canSubmit = computed(() =>
 
 const submit = () => {
     if (!canSubmit.value) return;
+    isSubmitting.value = true;
+    if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
     const data = form.data();
     delete data.tagInput;
     // Clean up empty overrides
@@ -352,9 +434,16 @@ const submit = () => {
             delete data.account_overrides;
         }
     }
-    form.transform(() => data).post('/posts', {
-        onSuccess: () => form.reset(),
-    });
+    // If auto-saved draft exists, update it instead of creating new
+    if (autoSavePostId.value) {
+        form.transform(() => data).put(`/posts/${autoSavePostId.value}`, {
+            onSuccess: () => form.reset(),
+        });
+    } else {
+        form.transform(() => data).post('/posts', {
+            onSuccess: () => form.reset(),
+        });
+    }
 };
 
 const minDate = () => {
@@ -655,15 +744,29 @@ const minDate = () => {
                 </div>
 
                 <!-- Actions -->
-                <div class="flex items-center justify-end space-x-3">
-                    <Link href="/posts"
-                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                        Cancel
-                    </Link>
-                    <button type="submit" :disabled="!canSubmit"
-                        class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                        Schedule Post
-                    </button>
+                <div class="flex items-center justify-between">
+                    <!-- Auto-save indicator -->
+                    <p v-if="autoSaveStatus" class="text-xs text-gray-400 flex items-center gap-1">
+                        <svg v-if="autoSaveStatus === 'saving...'" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                        <svg v-else class="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                        {{ autoSaveStatus }}
+                    </p>
+                    <div v-else></div>
+                    <div class="flex items-center space-x-3">
+                        <Link href="/posts"
+                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                            Cancel
+                        </Link>
+                        <button type="submit" :disabled="!canSubmit"
+                            class="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Schedule Post
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>
