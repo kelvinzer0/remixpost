@@ -34,7 +34,7 @@ class PostController extends Controller
         $accounts = $request->user()
             ->socialAccounts()
             ->where('is_active', true)
-            ->get(['id', 'provider', 'name', 'username', 'avatar']);
+            ->get(['id', 'provider', 'name', 'username', 'avatar', 'metadata']);
 
         $media = $request->user()
             ->media()
@@ -136,7 +136,7 @@ class PostController extends Controller
         $accounts = $request->user()
             ->socialAccounts()
             ->where('is_active', true)
-            ->get(['id', 'provider', 'name', 'username', 'avatar']);
+            ->get(['id', 'provider', 'name', 'username', 'avatar', 'metadata']);
 
         return Inertia::render('Posts/Edit', [
             'post' => $post,
