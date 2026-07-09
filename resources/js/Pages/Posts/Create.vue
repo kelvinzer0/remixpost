@@ -24,7 +24,7 @@ const showMediaPicker = ref(false);
 const providerFallback = {
     twitter: { label: 'Twitter/X', color: 'bg-black', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
     facebook: { label: 'Facebook', color: 'bg-blue-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
-    linkedin: { label: 'LinkedIn', color: 'bg-blue-700', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    linkedin: { label: 'LinkedIn', color: 'bg-blue-700', supports_image: true, supports_video: true, supports_pdf: true, requires_media: false, allows_text_only: true },
     instagram: { label: 'Instagram', color: 'bg-pink-500', supports_image: true, supports_video: true, requires_media: true, allows_text_only: false },
     youtube: { label: 'YouTube', color: 'bg-red-600', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
     tiktok: { label: 'TikTok', color: 'bg-black', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
@@ -47,8 +47,13 @@ const isVideoUrl = (url) => {
     const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
     return ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(ext);
 };
+const isPdfUrl = (url) => {
+    const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
+    return ext === 'pdf';
+};
 const isImageMime = (mime) => mime?.startsWith('image/');
 const isVideoMime = (mime) => mime?.startsWith('video/');
+const isPdfMime = (mime) => mime === 'application/pdf';
 
 /**
  * Returns { ok: bool, message: string|null } for a given provider + current form state.
@@ -222,7 +227,11 @@ const minDate = () => {
                                             class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800 border border-green-200">
                                             VIDEO OK
                                         </span>
-                                        <span v-if="!getReq(account.provider).supports_image && !getReq(account.provider).supports_video"
+                                        <span v-if="getReq(account.provider).supports_pdf"
+                                            class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                            PDF OK
+                                        </span>
+                                        <span v-if="!getReq(account.provider).supports_image && !getReq(account.provider).supports_video && !getReq(account.provider).supports_pdf"
                                             class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-600 border border-gray-200">
                                             TEXT ONLY
                                         </span>
@@ -264,6 +273,10 @@ const minDate = () => {
                                 <svg class="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
                                 <span class="text-[9px] text-white mt-0.5">VIDEO</span>
                             </div>
+                            <div v-else-if="isPdfUrl(url)" class="w-20 h-20 flex flex-col items-center justify-center bg-rose-50 rounded-md border border-rose-200">
+                                <svg class="w-7 h-7 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><text x="10" y="14" text-anchor="middle" fill="#fff" font-size="6" font-weight="bold">PDF</text></svg>
+                                <span class="text-[9px] text-rose-700 mt-0.5 font-semibold">PDF</span>
+                            </div>
                             <div v-else class="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
                                 <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -290,6 +303,10 @@ const minDate = () => {
                                 <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
                                 <div v-else-if="isVideoMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-gray-900">
                                     <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
+                                </div>
+                                <div v-else-if="isPdfMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-rose-50">
+                                    <svg class="w-5 h-5 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                    <span class="text-[8px] text-rose-700 mt-0.5 font-bold">PDF</span>
                                 </div>
                                 <div v-else class="w-full h-16 flex items-center justify-center bg-gray-100">
                                     <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

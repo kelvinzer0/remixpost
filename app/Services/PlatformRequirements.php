@@ -55,8 +55,9 @@ class PlatformRequirements
                 'allows_text_only' => true,
                 'supports_image' => true,
                 'supports_video' => true,
+                'supports_pdf' => true,
                 'max_content_length' => 3000,
-                'notes' => 'Text-only OK. Supports multiple images OR single video per post.',
+                'notes' => 'Text-only OK. Supports multiple images OR single video OR single PDF (carousel, 1:1 pages, max 300 pages, max 100MB) per post.',
             ],
             'instagram' => [
                 'label' => 'Instagram',

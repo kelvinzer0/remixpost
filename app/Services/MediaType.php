@@ -17,6 +17,10 @@ class MediaType
 {
     public const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
     public const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v', 'flv', 'wmv', '3gp'];
+    public const DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'rtf'];
+    // LinkedIn supports: PDF only (max 100MB, max 300 pages)
+    // We expose the broader list above for general categorization, but
+    // publishers should validate per-platform (LinkedIn = pdf only).
 
     /**
      * Detect media type from URL (by file extension).
@@ -33,7 +37,32 @@ class MediaType
         if (in_array($ext, self::VIDEO_EXTENSIONS)) {
             return 'video';
         }
+        // Documents (PDF, DOCX, etc.) — treated as 'document' bucket
+        // Note:MediaType::fromUrl returns 'document' for ALL non-image/video
+        // files (including unknown extensions like .bin). Callers that need
+        // to distinguish PDFs specifically should use isPdfUrl().
         return 'document';
+    }
+
+    /**
+     * Check if URL points to a PDF file specifically.
+     * Useful for LinkedIn (which only supports PDF as document type).
+     */
+    public static function isPdfUrl(string $url): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return $ext === 'pdf';
+    }
+
+    /**
+     * Check if URL points to any document (PDF, DOCX, PPTX, etc).
+     */
+    public static function isDocumentUrl(string $url): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return in_array($ext, self::DOCUMENT_EXTENSIONS);
     }
 
     /**

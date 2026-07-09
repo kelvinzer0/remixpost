@@ -24,7 +24,7 @@ const form = useForm({
 const providerFallback = {
     twitter: { label: 'Twitter/X', color: 'bg-black', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
     facebook: { label: 'Facebook', color: 'bg-blue-600', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
-    linkedin: { label: 'LinkedIn', color: 'bg-blue-700', supports_image: true, supports_video: true, requires_media: false, allows_text_only: true },
+    linkedin: { label: 'LinkedIn', color: 'bg-blue-700', supports_image: true, supports_video: true, supports_pdf: true, requires_media: false, allows_text_only: true },
     instagram: { label: 'Instagram', color: 'bg-pink-500', supports_image: true, supports_video: true, requires_media: true, allows_text_only: false },
     youtube: { label: 'YouTube', color: 'bg-red-600', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
     tiktok: { label: 'TikTok', color: 'bg-black', supports_image: false, supports_video: true, requires_media: true, media_type: 'video', allows_text_only: false },
@@ -46,6 +46,10 @@ const isImageUrl = (url) => {
 const isVideoUrl = (url) => {
     const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
     return ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(ext);
+};
+const isPdfUrl = (url) => {
+    const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
+    return ext === 'pdf';
 };
 
 const checkProvider = (provider) => {
@@ -208,7 +212,11 @@ const removeMedia = (i) => form.media_urls.splice(i, 1);
                                             class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800 border border-green-200">
                                             VIDEO OK
                                         </span>
-                                        <span v-if="!getReq(account.provider).supports_image && !getReq(account.provider).supports_video"
+                                        <span v-if="getReq(account.provider).supports_pdf"
+                                            class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-rose-100 text-rose-800 border border-rose-200">
+                                            PDF OK
+                                        </span>
+                                        <span v-if="!getReq(account.provider).supports_image && !getReq(account.provider).supports_video && !getReq(account.provider).supports_pdf"
                                             class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-600 border border-gray-200">
                                             TEXT ONLY
                                         </span>
@@ -243,6 +251,10 @@ const removeMedia = (i) => form.media_urls.splice(i, 1);
                             <div v-else-if="isVideoUrl(url)" class="w-20 h-20 flex flex-col items-center justify-center bg-gray-900 rounded-md border border-gray-200">
                                 <svg class="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
                                 <span class="text-[9px] text-white mt-0.5">VIDEO</span>
+                            </div>
+                            <div v-else-if="isPdfUrl(url)" class="w-20 h-20 flex flex-col items-center justify-center bg-rose-50 rounded-md border border-rose-200">
+                                <svg class="w-7 h-7 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                <span class="text-[9px] text-rose-700 mt-0.5 font-semibold">PDF</span>
                             </div>
                             <div v-else class="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
                                 <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

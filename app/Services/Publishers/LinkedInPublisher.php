@@ -67,9 +67,12 @@ class LinkedInPublisher implements PublisherInterface
             // Categorize media
             $imageUrls = [];
             $videoUrls = [];
+            $documentUrls = [];
             foreach ($mediaUrls as $url) {
                 if (MediaType::fromUrl($url) === 'video') {
                     $videoUrls[] = $url;
+                } elseif (MediaType::isPdfUrl($url)) {
+                    $documentUrls[] = $url;
                 } else {
                     $imageUrls[] = $url;
                 }
@@ -89,8 +92,33 @@ class LinkedInPublisher implements PublisherInterface
                 'isReshareDisabledByAuthor' => false,
             ];
 
-            // Handle media — prefer images if mixed (LinkedIn only allows one category per post)
-            if (!empty($imageUrls)) {
+            // Handle media — LinkedIn only allows one media category per post.
+            // Priority: documents > videos > images (docs are rarer + most specific)
+            if (!empty($documentUrls)) {
+                // PDF document post — LinkedIn renders PDFs as a swipeable
+                // carousel of pages (1:1 aspect ratio per page).
+                // Only ONE document per post (LinkedIn API limitation).
+                $url = $documentUrls[0];
+                $result = $this->uploadDocument($url, $accessToken, $authorUrn);
+                if (!$result['success']) {
+                    return [
+                        'success' => false,
+                        'error' => 'LinkedIn document upload failed: ' . $result['error'],
+                    ];
+                }
+                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
+            } elseif (!empty($videoUrls)) {
+                // Video post — single video only (LinkedIn limitation)
+                $url = $videoUrls[0];
+                $result = $this->uploadVideo($url, $accessToken, $authorUrn);
+                if (!$result['success']) {
+                    return [
+                        'success' => false,
+                        'error' => 'LinkedIn video upload failed: ' . $result['error'],
+                    ];
+                }
+                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
+            } elseif (!empty($imageUrls)) {
                 $mediaIds = [];
                 foreach ($imageUrls as $url) {
                     $result = $this->uploadImage($url, $accessToken, $authorUrn);
@@ -107,17 +135,6 @@ class LinkedInPublisher implements PublisherInterface
                         ];
                     }
                 }
-            } elseif (!empty($videoUrls)) {
-                // Video post — single video only (LinkedIn limitation)
-                $url = $videoUrls[0];
-                $result = $this->uploadVideo($url, $accessToken, $authorUrn);
-                if (!$result['success']) {
-                    return [
-                        'success' => false,
-                        'error' => 'LinkedIn video upload failed: ' . $result['error'],
-                    ];
-                }
-                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
             }
 
             // Create the post via REST Posts API
@@ -205,6 +222,82 @@ class LinkedInPublisher implements PublisherInterface
             $this->waitForMediaReady($assetUrn, $accessToken, 'images');
 
             return ['success' => true, 'assetUrn' => $assetUrn, 'error' => null];
+        } catch (Exception $e) {
+            return ['success' => false, 'assetUrn' => null, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Upload video via REST Videos API.
+    /**
+     * Upload PDF document via REST Documents API.
+     *
+     * LinkedIn supports PDF uploads as "documents" — rendered in feed as a
+     * swipeable carousel of pages (each page shown at 1:1 aspect ratio).
+     * Limitations:
+     *   - PDF only (no DOCX/PPT/etc)
+     *   - Max 100MB file size
+     *   - Max 300 pages
+     *
+     * Flow (similar to images):
+     *   1. POST /rest/documents?action=initializeUpload { initializeUploadRequest: { owner } }
+     *      → returns { value: { document: urn, uploadUrl } }
+     *   2. Single PUT to uploadUrl with PDF bytes
+     *   3. Poll GET /rest/documents/{urn} until status=AVAILABLE
+     */
+    private function uploadDocument(string $url, string $accessToken, string $authorUrn): array
+    {
+        try {
+            // Download PDF bytes
+            $mediaResponse = $this->httpClient->get($url);
+            $mediaData = $mediaResponse->getBody()->getContents();
+            $mediaMime = $mediaResponse->getHeaderLine('Content-Type') ?: 'application/pdf';
+
+            // LinkedIn strictly requires application/pdf for documents
+            if (!str_contains($mediaMime, 'pdf')) {
+                $mediaMime = 'application/pdf';
+            }
+
+            // Initialize upload
+            $initResp = $this->httpClient->post('https://api.linkedin.com/rest/documents?action=initializeUpload', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => [
+                    'initializeUploadRequest' => [
+                        'owner' => $authorUrn,
+                    ],
+                ],
+            ]);
+            $initBody = json_decode($initResp->getBody()->getContents(), true);
+            $assetUrn = $initBody['value']['document'] ?? null;
+            $uploadUrl = $initBody['value']['uploadUrl'] ?? null;
+
+            if (!$assetUrn || !$uploadUrl) {
+                return ['success' => false, 'assetUrn' => null, 'error' => 'document initializeUpload did not return document URN or upload URL'];
+            }
+
+            // Single PUT (documents don't need chunking like videos)
+            $this->httpClient->put($uploadUrl, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $accessToken,
+                    'Content-Type' => $mediaMime,
+                    'Content-Length' => strlen($mediaData),
+                ],
+                'body' => $mediaData,
+            ]);
+
+            // Poll until AVAILABLE
+            $this->waitForMediaReady($assetUrn, $accessToken, 'documents');
+
+            return ['success' => true, 'assetUrn' => $assetUrn, 'error' => null];
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            $resp = $e->getResponse();
+            $body = $resp ? json_decode($resp->getBody()->getContents(), true) : null;
+            $err = $body['message'] ?? $e->getMessage();
+            // LinkedIn rejects non-PDF with: "File type is not supported"
+            if (stripos($err, 'not supported') !== false) {
+                $err .= ' — LinkedIn only supports PDF documents.';
+            }
+            return ['success' => false, 'assetUrn' => null, 'error' => $err];
         } catch (Exception $e) {
             return ['success' => false, 'assetUrn' => null, 'error' => $e->getMessage()];
         }
