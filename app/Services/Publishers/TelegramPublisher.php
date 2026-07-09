@@ -103,24 +103,56 @@ class TelegramPublisher implements PublisherInterface
 
         switch ($type) {
             case 'image':
-                $params['photo'] = $mediaUrl;
                 $endpoint = '/sendPhoto';
+                $fileField = 'photo';
                 break;
             case 'video':
-                $params['video'] = $mediaUrl;
-                $params['supports_streaming'] = 'true';
                 $endpoint = '/sendVideo';
+                $fileField = 'video';
+                $params['supports_streaming'] = 'true';
                 break;
             default:
-                // Documents and unknown types → sendDocument
-                $params['document'] = $mediaUrl;
                 $endpoint = '/sendDocument';
+                $fileField = 'document';
                 break;
         }
 
-        $response = $this->httpClient->post("{$apiBase}{$endpoint}", [
-            'form_params' => $params,
-        ]);
+        // Download media file first, then upload as multipart (not URL).
+        // Telegram URL download limit is 5MB for images, but file upload
+        // limit is 50MB. By downloading + uploading, we avoid the 5MB
+        // URL limit and also work with larger files (compression helps too).
+        try {
+            $mediaResponse = $this->httpClient->get($mediaUrl);
+            $mediaData = $mediaResponse->getBody()->getContents();
+            $mediaMime = $mediaResponse->getHeaderLine('Content-Type') ?: 'application/octet-stream';
+            $ext = MediaType::extension($mediaUrl) ?: 'bin';
+            $filename = 'media.' . $ext;
+
+            $multipart = [
+                ['name' => 'chat_id', 'contents' => $params['chat_id']],
+                ['name' => 'caption', 'contents' => $params['caption'] ?? ''],
+                ['name' => 'parse_mode', 'contents' => $params['parse_mode'] ?? 'HTML'],
+            ];
+            if (isset($params['supports_streaming'])) {
+                $multipart[] = ['name' => 'supports_streaming', 'contents' => 'true'];
+            }
+            $multipart[] = [
+                'name' => $fileField,
+                'contents' => $mediaData,
+                'filename' => $filename,
+                'headers' => ['Content-Type' => $mediaMime],
+            ];
+
+            $response = $this->httpClient->post("{$apiBase}{$endpoint}", [
+                'multipart' => $multipart,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback: try URL method (works for small files <5MB)
+            $params[$fileField] = $mediaUrl;
+            $response = $this->httpClient->post("{$apiBase}{$endpoint}", [
+                'form_params' => $params,
+            ]);
+        }
 
         return $this->parseResponse($response);
     }
