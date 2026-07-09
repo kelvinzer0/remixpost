@@ -1914,7 +1914,11 @@ class SocialAccountController extends Controller
         ]);
 
         $account = SocialAccount::findOrFail($validated['account_id']);
-        $this->authorize('update', $account);
+
+        // Manual ownership check (no policy registered for SocialAccount)
+        if ($account->user_id !== $request->user()->id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
 
         // Ensure this is a Buffer Pinterest account
         if ($account->provider !== 'buffer') {
