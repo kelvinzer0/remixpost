@@ -77,6 +77,10 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
 
+    // Analytics
+    Route::get('/analytics', [\App\Http\Controllers\AnalyticsController::class, 'index'])->name('analytics.index');
+    Route::post('/analytics/refresh', [\App\Http\Controllers\AnalyticsController::class, 'refresh'])->name('analytics.refresh');
+
     // AI Caption Generator
     Route::post('/ai/caption', [\App\Http\Controllers\AICaptionController::class, 'generate'])->name('ai.caption.generate');
     Route::get('/ai/tones', [\App\Http\Controllers\AICaptionController::class, 'tones'])->name('ai.tones');
