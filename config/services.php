@@ -75,4 +75,17 @@ return [
         'bot_token' => env('TELEGRAM_TOKEN'),
         'bot_name' => env('TELEGRAM_BOT_NAME'),
     ],
+    'buffer' => [
+        'client_id' => env('BUFFER_CLIENT_ID'),
+        // Buffer uses OAuth 2.0 + PKCE (mandatory). No client_secret needed
+        // because the app is registered as a "public client" in Buffer's
+        // client management UI. PKCE code_challenge replaces the secret.
+        'redirect' => '/integrations/social/buffer',
+        // All scopes — Buffer rotates refresh tokens, so we need offline_access.
+        'scopes' => ['posts:write', 'posts:read', 'ideas:read', 'ideas:write',
+                     'account:read', 'account:write', 'offline_access'],
+        'api_url' => 'https://api.buffer.com',
+        'auth_url' => 'https://auth.buffer.com/auth',
+        'token_url' => 'https://auth.buffer.com/token',
+    ],
 ];

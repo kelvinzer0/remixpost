@@ -51,8 +51,10 @@ class PublishPostJob implements ShouldQueue
             $result = $publisher->publish([
                 'content' => $post->content,
                 'media_urls' => $post->media_urls ?? [],
+                'scheduled_at' => $post->scheduled_at,
             ], [
                 'id' => $account->id,
+                'user_id' => $account->user_id,
                 'access_token' => $account->access_token,
                 'refresh_token' => $account->refresh_token,
                 'provider_id' => $account->provider_id,

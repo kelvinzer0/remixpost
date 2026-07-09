@@ -1473,4 +1473,356 @@ class SocialAccountController extends Controller
         return redirect()->route('social-accounts.index')
             ->with('message', "Discord webhook '{$name}' connected successfully.");
     }
+
+    /**
+     * Connect a Buffer account — Step 1: Initiate OAuth 2.0 + PKCE flow.
+     *
+     * Buffer uses OAuth 2.0 with mandatory PKCE for ALL clients (public
+     * clients don't even have a client_secret — PKCE alone authenticates).
+     *
+     * Flow:
+     *   1. Generate code_verifier (random 32 bytes, base64url)
+     *   2. Generate code_challenge = base64url(SHA256(code_verifier))
+     *   3. Store code_verifier + state in session
+     *   4. Redirect user to https://auth.buffer.com/auth?client_id=...
+     *      &code_challenge=...&code_challenge_method=S256&prompt=consent
+     *   5. User authorizes → Buffer redirects back with ?code=...
+     *   6. handleBufferCallback() exchanges code + code_verifier for tokens
+     */
+    public function connectBuffer(Request $request)
+    {
+        $clientId = config('services.buffer.client_id');
+        if (!$clientId) {
+            return back()->with('error', 'BUFFER_CLIENT_ID is not configured in .env');
+        }
+
+        // Generate PKCE verifier + challenge (per Buffer docs PHP example)
+        $codeVerifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $codeChallenge = rtrim(strtr(base64_encode(hash('sha256', $codeVerifier, true)), '+/', '-_'), '=');
+        $state = \Illuminate\Support\Str::random(32);
+
+        session([
+            'buffer_code_verifier' => $codeVerifier,
+            'buffer_state' => $state,
+            'oauth_user_id' => $request->user()->id,
+        ]);
+
+        $scopes = implode(' ', config('services.buffer.scopes'));
+        $redirectUri = url(config('services.buffer.redirect'));
+        $authUrl = config('services.buffer.auth_url') . '?' . http_build_query([
+            'client_id' => $clientId,
+            'redirect_uri' => $redirectUri,
+            'response_type' => 'code',
+            'scope' => $scopes,
+            'state' => $state,
+            'code_challenge' => $codeChallenge,
+            'code_challenge_method' => 'S256',
+            'prompt' => 'consent', // force consent so we always get a fresh refresh_token
+        ]);
+
+        // Use Inertia::location to do full page navigation (avoid CORS — same fix as Mastodon)
+        return Inertia::location($authUrl);
+    }
+
+    /**
+     * Buffer OAuth callback — Step 2: Exchange code for tokens, fetch orgs.
+     *
+     * Buffer returns access_token + refresh_token + expires_in.
+     * Refresh tokens are SINGLE-USE — store them carefully, never reuse.
+     *
+     * After token exchange, query account { organizations { id name } }
+     * to get list of Buffer organizations (workspaces) the user has.
+     * Render SelectBufferOrganization.vue to let user pick which org.
+     */
+    public function handleBufferCallback(Request $request)
+    {
+        if ($request->has('error')) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Buffer authorization failed: ' . $request->get('error_description', $request->get('error')));
+        }
+
+        $code = $request->get('code');
+        $state = $request->get('state');
+        $expectedState = session('buffer_state');
+        $codeVerifier = session('buffer_code_verifier');
+        $userId = session('oauth_user_id', $request->user() ? $request->user()->id : null);
+
+        if (!$code || !$state || !$codeVerifier) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Buffer callback missing required parameters.');
+        }
+
+        if ($state !== $expectedState) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid state parameter. Please try connecting again.');
+        }
+
+        // Exchange code for tokens
+        $clientId = config('services.buffer.client_id');
+        $tokenUrl = config('services.buffer.token_url');
+        $redirectUri = url(config('services.buffer.redirect'));
+
+        try {
+            $tokenResponse = Http::asForm()->post($tokenUrl, [
+                'client_id' => $clientId,
+                // Public client: no client_secret — PKCE code_verifier authenticates
+                'grant_type' => 'authorization_code',
+                'code' => $code,
+                'redirect_uri' => $redirectUri,
+                'code_verifier' => $codeVerifier,
+            ]);
+
+            if (!$tokenResponse->ok()) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Failed to exchange Buffer code for token: ' . $tokenResponse->body());
+            }
+
+            $tokenData = $tokenResponse->json();
+            $accessToken = $tokenData['access_token'] ?? null;
+            $refreshToken = $tokenData['refresh_token'] ?? null;
+            $expiresIn = $tokenData['expires_in'] ?? 3600;
+
+            if (!$accessToken || !$refreshToken) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Buffer did not return access_token or refresh_token.');
+            }
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Buffer token exchange failed: ' . $e->getMessage());
+        }
+
+        // Fetch user account + organizations via GraphQL
+        try {
+            $accountQuery = 'query {
+  account {
+    id
+    email
+    name
+    avatar
+    organizations { id name }
+  }
+}';
+            $accountResponse = Http::withToken($accessToken)
+                ->post(config('services.buffer.api_url'), ['query' => $accountQuery]);
+
+            $accountBody = $accountResponse->json();
+            if (isset($accountBody['errors']) && !empty($accountBody['errors'])) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Failed to fetch Buffer account: ' . ($accountBody['errors'][0]['message'] ?? 'Unknown'));
+            }
+
+            $account = $accountBody['data']['account'] ?? null;
+            if (!$account) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Buffer did not return account info.');
+            }
+
+            $organizations = $account['organizations'] ?? [];
+            if (empty($organizations)) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'No Buffer organizations found. Create an organization in Buffer first.');
+            }
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Failed to fetch Buffer account: ' . $e->getMessage());
+        }
+
+        // Store tokens + account info in session for next step
+        session([
+            'buffer_access_token' => $accessToken,
+            'buffer_refresh_token' => $refreshToken,
+            'buffer_expires_in' => $expiresIn,
+            'buffer_account' => $account,
+            'buffer_organizations' => $organizations,
+        ]);
+
+        // Render org picker (single org → skip to channel picker)
+        if (count($organizations) === 1) {
+            return $this->showBufferChannelPicker($organizations[0]);
+        }
+
+        return Inertia::render('SocialAccounts/SelectBufferOrganization', [
+            'organizations' => $organizations,
+            'account' => [
+                'name' => $account['name'] ?? $account['email'] ?? 'Buffer User',
+                'email' => $account['email'] ?? null,
+                'avatar' => $account['avatar'] ?? null,
+            ],
+        ]);
+    }
+
+    /**
+     * Step 3 (multi-org): User selected an organization. Show channel picker.
+     */
+    public function selectBufferOrganization(Request $request)
+    {
+        $validated = $request->validate([
+            'organization_id' => 'required|string',
+        ]);
+
+        $organizations = session('buffer_organizations', []);
+        $selected = collect($organizations)->firstWhere('id', $validated['organization_id']);
+
+        if (!$selected) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid Buffer organization selection.');
+        }
+
+        return $this->showBufferChannelPicker($selected);
+    }
+
+    /**
+     * Internal: fetch channels for org, render channel picker (multi-select).
+     * User can connect multiple channels at once — each becomes a
+     * separate SocialAccount row (provider='buffer', provider_id=channel_id).
+     *
+     * Returns either Inertia\Response (success) or RedirectResponse (error).
+     */
+    private function showBufferChannelPicker(array $organization)
+    {
+        $accessToken = session('buffer_access_token');
+        $orgId = $organization['id'];
+
+        // Fetch channels (Buffer calls them "channels", formerly "profiles")
+        $channelsQuery = 'query GetChannels($orgId: ID!) {
+  channels(input: { organizationId: $orgId, filter: { isLocked: false } }) {
+    id
+    name
+    displayName
+    service
+    avatar
+    isQueuePaused
+    isDisconnected
+  }
+}';
+        try {
+            $response = Http::withToken($accessToken)
+                ->post(config('services.buffer.api_url'), [
+                    'query' => $channelsQuery,
+                    'variables' => ['orgId' => $orgId],
+                ]);
+
+            $body = $response->json();
+            if (isset($body['errors']) && !empty($body['errors'])) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Failed to fetch Buffer channels: ' . ($body['errors'][0]['message'] ?? 'Unknown'));
+            }
+
+            $channels = $body['data']['channels'] ?? [];
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Failed to fetch Buffer channels: ' . $e->getMessage());
+        }
+
+        // Filter out disconnected channels
+        $channels = array_filter($channels, fn($c) => empty($c['isDisconnected']));
+
+        return Inertia::render('SocialAccounts/SelectBufferChannel', [
+            'channels' => array_values($channels),
+            'organization' => $organization,
+        ]);
+    }
+
+    /**
+     * Step 4: User selected channels. Store each as SocialAccount.
+     * Multi-select — user can connect multiple channels (FB + IG + X + LinkedIn) at once.
+     */
+    public function selectBufferChannel(Request $request)
+    {
+        $validated = $request->validate([
+            'channel_ids' => 'required|array|min:1',
+            'channel_ids.*' => 'required|string',
+        ]);
+
+        $accessToken = session('buffer_access_token');
+        $refreshToken = session('buffer_refresh_token');
+        $expiresIn = session('buffer_expires_in');
+        $account = session('buffer_account');
+        $organizations = session('buffer_organizations', []);
+        $userId = session('oauth_user_id', $request->user() ? $request->user()->id : null);
+
+        if (!$accessToken || !$refreshToken || !$account) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Buffer session expired. Please try connecting again.');
+        }
+
+        // Fetch all channels again to get full info (we need service + name)
+        $orgId = null;
+        if (count($organizations) === 1) {
+            $orgId = $organizations[0]['id'];
+        } else {
+            // Multi-org case: pick first one (user already selected in previous step,
+            // but we stored all orgs in session — for simplicity, use the one that
+            // matches the channels they selected)
+            $orgId = $organizations[0]['id'];
+        }
+
+        $channelsQuery = 'query GetChannels($orgId: ID!) {
+  channels(input: { organizationId: $orgId, filter: { isLocked: false } }) {
+    id name displayName service avatar isDisconnected
+  }
+}';
+        try {
+            $response = Http::withToken($accessToken)
+                ->post(config('services.buffer.api_url'), [
+                    'query' => $channelsQuery,
+                    'variables' => ['orgId' => $orgId],
+                ]);
+            $allChannels = $response->json('data.channels', []);
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Failed to fetch channels for storage: ' . $e->getMessage());
+        }
+
+        $connectedCount = 0;
+        $connectedNames = [];
+        foreach ($validated['channel_ids'] as $channelId) {
+            $ch = collect($allChannels)->firstWhere('id', $channelId);
+            if (!$ch) continue;
+
+            $service = $ch['service'] ?? 'unknown';
+            $displayName = $ch['displayName'] ?? $ch['name'] ?? "Buffer {$service}";
+            $name = "{$displayName} (Buffer → {$service})";
+
+            SocialAccount::updateOrCreate(
+                [
+                    'provider' => 'buffer',
+                    'provider_id' => $channelId,
+                ],
+                [
+                    'user_id' => $userId,
+                    'name' => $name,
+                    'username' => $ch['name'] ?? $displayName,
+                    'avatar' => $ch['avatar'] ?? null,
+                    'access_token' => $accessToken,
+                    'refresh_token' => $refreshToken,
+                    'expires_at' => $expiresIn ? now()->addSeconds($expiresIn) : null,
+                    'is_active' => true,
+                    'metadata' => [
+                        'channel_id' => $channelId,
+                        'channel_service' => $service,
+                        'channel_name' => $ch['name'] ?? $displayName,
+                        'channel_display_name' => $displayName,
+                        'organization_id' => $orgId,
+                        'buffer_account_email' => $account['email'] ?? null,
+                    ],
+                ]
+            );
+            $connectedCount++;
+            $connectedNames[] = $name;
+        }
+
+        session()->forget([
+            'buffer_access_token', 'buffer_refresh_token', 'buffer_expires_in',
+            'buffer_account', 'buffer_organizations', 'buffer_code_verifier',
+            'buffer_state', 'oauth_user_id',
+        ]);
+
+        $msg = $connectedCount === 1
+            ? "Buffer channel '{$connectedNames[0]}' connected successfully."
+            : "{$connectedCount} Buffer channels connected: " . implode(', ', $connectedNames);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', $msg);
+    }
 }

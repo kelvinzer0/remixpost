@@ -16,6 +16,7 @@ const providers = [
     { id: 'telegram', name: 'Telegram Channel', color: 'bg-blue-500', icon: '✈', oauth: false },
     { id: 'email', name: 'Email Newsletter', color: 'bg-gray-600', icon: '✉', oauth: false },
     { id: 'discord', name: 'Discord Channel', color: 'bg-indigo-600', icon: '🎮', oauth: false },
+    { id: 'buffer', name: 'Buffer (Aggregator)', color: 'bg-blue-900', icon: 'B', oauth: false },
 ];
 
 // Telegram manual connect form
@@ -64,6 +65,15 @@ const connectDiscord = () => {
     });
 };
 
+// Buffer connect — triggers OAuth+PKCE flow, no form fields needed
+const bufferForm = useForm({});
+
+const connectBuffer = () => {
+    bufferForm.post('/integrations/social/connect-buffer', {
+        onSuccess: () => bufferForm.reset(),
+    });
+};
+
 const oauthProviders = providers.filter(p => p.oauth);
 const manualProviders = providers.filter(p => !p.oauth);
 </script>
@@ -98,6 +108,7 @@ const manualProviders = providers.filter(p => !p.oauth);
                                     'bg-gray-600': account.provider === 'email',
                                     'bg-pink-500': account.provider === 'instagram',
                                     'bg-indigo-600': account.provider === 'discord',
+                                    'bg-blue-900': account.provider === 'buffer',
                                 }">
                                 {{ account.provider.charAt(0).toUpperCase() }}
                             </div>
@@ -288,6 +299,35 @@ const manualProviders = providers.filter(p => !p.oauth);
                         <button type="submit" :disabled="discordForm.processing"
                             class="w-full py-2 text-xs font-medium text-center text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">
                             {{ discordForm.processing ? 'Validating webhook...' : 'Connect Discord Webhook' }}
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Buffer -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <div class="flex items-center mb-4">
+                        <div class="flex items-center justify-center w-10 h-10 rounded-full text-white text-lg font-bold bg-blue-900">
+                            B
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-gray-900">Buffer (Aggregator)</p>
+                            <p class="text-xs text-gray-500">FB · IG · X · Pinterest · LinkedIn · TikTok · more</p>
+                        </div>
+                    </div>
+                    <div class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                        <p class="font-medium mb-1">Why Buffer?</p>
+                        <p class="mb-1">Bypass strict app review for Meta (FB/IG), Pinterest, X, and TikTok. Buffer already has approved apps — connect once, publish to all.</p>
+                        <p class="font-medium mt-2 mb-1">Setup:</p>
+                        <ol class="list-decimal ml-4 space-y-0.5">
+                            <li>Register client at <a href="https://buffer.com/clients/manage" target="_blank" class="underline">buffer.com/clients</a> (Public client + PKCE)</li>
+                            <li>Set <code class="px-0.5 bg-blue-100 rounded">BUFFER_CLIENT_ID</code> in .env</li>
+                            <li>Click button below → pick channels</li>
+                        </ol>
+                    </div>
+                    <form @submit.prevent="connectBuffer" class="space-y-3">
+                        <button type="submit" :disabled="bufferForm.processing"
+                            class="w-full py-2 text-xs font-medium text-center text-white bg-blue-900 rounded-md hover:bg-blue-800 disabled:opacity-50">
+                            {{ bufferForm.processing ? 'Connecting...' : 'Connect via Buffer' }}
                         </button>
                     </form>
                 </div>

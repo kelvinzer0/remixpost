@@ -38,6 +38,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/integrations/social/mastodon', [SocialAccountController::class, 'handleMastodonCallback'])->name('social-accounts.mastodon-callback');
     Route::post('/integrations/social/connect-mastodon', [SocialAccountController::class, 'connectMastodon'])->name('social-accounts.connect-mastodon');
 
+    // Buffer — OAuth 2.0 + PKCE flow (aggregator for FB/IG/X/Pinterest/LinkedIn/TikTok/etc).
+    // Same critical ordering rule as Mastodon: register BEFORE the {provider} wildcard.
+    Route::get('/integrations/social/buffer', [SocialAccountController::class, 'handleBufferCallback'])->name('social-accounts.buffer-callback');
+    Route::post('/integrations/social/connect-buffer', [SocialAccountController::class, 'connectBuffer'])->name('social-accounts.connect-buffer');
+    Route::post('/integrations/social/select-buffer-organization', [SocialAccountController::class, 'selectBufferOrganization'])->name('social-accounts.select-buffer-organization');
+    Route::post('/integrations/social/select-buffer-channel', [SocialAccountController::class, 'selectBufferChannel'])->name('social-accounts.select-buffer-channel');
+
     // Callback URLs — compatible with Postiz pattern for easy migration
     Route::get('/integrations/social/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
     // Legacy callback URL (backward compatible with existing remixpost setups)

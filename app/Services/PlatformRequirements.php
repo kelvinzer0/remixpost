@@ -146,6 +146,17 @@ class PlatformRequirements
                 'max_content_length' => 2000,
                 'notes' => 'Text-only OK. Posts via webhook. Max 2000 chars per message. Supports up to 10 attachments (images + videos).',
             ],
+            'buffer' => [
+                'label' => 'Buffer',
+                'color' => 'bg-blue-900',
+                'requires_media' => false,
+                'media_type' => null,
+                'allows_text_only' => true,
+                'supports_image' => true,
+                'supports_video' => true,
+                'max_content_length' => null, // Buffer routes to underlying platform, content limits vary
+                'notes' => 'Aggregator — routes post to Buffer channel (FB/IG/X/Pinterest/LinkedIn/TikTok/etc). Text-only OK. Media must be public HTTPS URL.',
+            ],
         ];
     }
 
