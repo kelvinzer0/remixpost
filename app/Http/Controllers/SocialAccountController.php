@@ -1210,7 +1210,13 @@ class SocialAccountController extends Controller
             'state' => $state,
         ]);
 
-        return redirect($authorizeUrl);
+        // IMPORTANT: do NOT use redirect($authorizeUrl) here.
+        // The form was submitted via Inertia's useForm().post() which sends an XHR.
+        // A redirect() response would cause Inertia to follow the redirect via XHR,
+        // which triggers CORS blocking because mastodon.social doesn't allow our origin.
+        // Inertia::location() tells the frontend to do a full page navigation
+        // (window.location.href = url) instead of an XHR visit.
+        return Inertia::location($authorizeUrl);
     }
 
     /**
