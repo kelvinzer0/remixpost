@@ -12,8 +12,7 @@ const providers = [
     { id: 'linkedin', name: 'LinkedIn', color: 'bg-blue-700', icon: 'in', oauth: true },
     { id: 'youtube', name: 'YouTube', color: 'bg-red-600', icon: '▶', oauth: true, note: 'Video only' },
     { id: 'tiktok', name: 'TikTok', color: 'bg-black', icon: '♪', oauth: true, note: 'Video only' },
-    { id: 'pinterest', name: 'Pinterest', color: 'bg-red-700', icon: 'P', oauth: true, note: 'Image only' },
-    { id: 'mastodon', name: 'Mastodon', color: 'bg-purple-600', icon: 'M', oauth: true },
+    { id: 'pinterest', name: 'Pinterest', color: 'bg-red-700', icon: 'P', oauth: true, note: 'Image/Video' },
     { id: 'telegram', name: 'Telegram Channel', color: 'bg-blue-500', icon: '✈', oauth: false },
     { id: 'email', name: 'Email Newsletter', color: 'bg-gray-600', icon: '✉', oauth: false },
 ];
@@ -38,6 +37,17 @@ const emailForm = useForm({
 const connectEmail = () => {
     emailForm.post('/integrations/social/connect-email', {
         onSuccess: () => emailForm.reset(),
+    });
+};
+
+// Mastodon connect form — user provides instance URL, app auto-registers
+const mastodonForm = useForm({
+    instance_url: 'https://mastodon.social',
+});
+
+const connectMastodon = () => {
+    mastodonForm.post('/integrations/social/connect-mastodon', {
+        onSuccess: () => mastodonForm.reset(),
     });
 };
 
@@ -227,6 +237,41 @@ const manualProviders = providers.filter(p => !p.oauth);
                     </form>
                 </div>
             </div>
+
+            <!-- Mastodon (full-width) -->
+            <div class="mt-4 bg-white p-6 rounded-lg shadow">
+                <div class="flex items-center mb-4">
+                    <div class="flex items-center justify-center w-10 h-10 rounded-full text-white text-lg font-bold bg-purple-600">
+                        M
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium text-gray-900">Mastodon</p>
+                        <p class="text-xs text-gray-500">Federated — works with any Mastodon instance</p>
+                    </div>
+                </div>
+                <div class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                    <p class="font-medium mb-1">How it works:</p>
+                    <ol class="list-decimal ml-4 space-y-0.5">
+                        <li>Enter your instance URL (e.g. <code>https://mastodon.social</code>)</li>
+                        <li>We auto-register an OAuth app on the instance</li>
+                        <li>You authorize on the instance — no manual app creation needed</li>
+                        <li>Token stored, ready to post toots</li>
+                    </ol>
+                </div>
+                <form @submit.prevent="connectMastodon" class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-700">Instance URL</label>
+                        <input v-model="mastodonForm.instance_url" type="url" required
+                            placeholder="https://mastodon.social"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+                        <p v-if="mastodonForm.errors.instance_url" class="mt-1 text-xs text-red-600">{{ mastodonForm.errors.instance_url }}</p>
+                    </div>
+                    <button type="submit" :disabled="mastodonForm.processing"
+                        class="w-full py-2 text-xs font-medium text-center text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50">
+                        {{ mastodonForm.processing ? 'Registering app on instance...' : 'Connect Mastodon Instance' }}
+                    </button>
+                </form>
+            </div>
         </div>
 
         <!-- Info box -->
@@ -239,9 +284,10 @@ const manualProviders = providers.filter(p => !p.oauth);
                 <code class="px-1 py-0.5 bg-blue-100 rounded">YOUTUBE_CLIENT_ID</code>,
                 <code class="px-1 py-0.5 bg-blue-100 rounded">TIKTOK_CLIENT_ID</code>,
                 <code class="px-1 py-0.5 bg-blue-100 rounded">PINTEREST_CLIENT_ID</code>,
-                <code class="px-1 py-0.5 bg-blue-100 rounded">MASTODON_CLIENT_ID</code>,
                 <code class="px-1 py-0.5 bg-blue-100 rounded">TELEGRAM_TOKEN</code> in your
                 <code class="px-1 py-0.5 bg-blue-100 rounded">.env</code> file.
+                <strong>Mastodon doesn't require .env config</strong> — OAuth app is auto-registered
+                on the instance when you connect.
                 See the README for links to each provider's developer portal.
             </p>
         </div>

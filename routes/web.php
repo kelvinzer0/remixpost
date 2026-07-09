@@ -34,6 +34,14 @@ Route::middleware('auth')->group(function () {
     // Legacy callback URL (backward compatible with existing remixpost setups)
     Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback']);
 
+    // Mastodon — manual OAuth flow (instance auto-registration, no Socialite).
+    // These routes must come AFTER /integrations/social/{provider} but they
+    // use literal paths so Laravel will match them before the wildcard.
+    // /integrations/social/mastodon is GET (callback from instance OAuth)
+    // while /integrations/social/connect-mastodon is POST (initiate flow).
+    Route::get('/integrations/social/mastodon', [SocialAccountController::class, 'handleMastodonCallback'])->name('social-accounts.mastodon-callback');
+    Route::post('/integrations/social/connect-mastodon', [SocialAccountController::class, 'connectMastodon'])->name('social-accounts.connect-mastodon');
+
     Route::post('/integrations/social/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
     Route::post('/integrations/social/select-pinterest-board', [SocialAccountController::class, 'selectPinterestBoard'])->name('social-accounts.select-pinterest-board');
     Route::post('/integrations/social/connect-instagram', [SocialAccountController::class, 'connectInstagram'])->name('social-accounts.connect-instagram');

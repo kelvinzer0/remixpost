@@ -29,7 +29,7 @@ class SocialAccountController extends Controller
      */
     public function redirectToProvider(Request $request, string $provider)
     {
-        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'mastodon'];
+        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest'];
         if (!in_array($provider, $allowed)) {
             return back()->with('error', "Provider {$provider} is not supported.");
         }
@@ -86,7 +86,7 @@ class SocialAccountController extends Controller
      */
     public function handleProviderCallback(Request $request, string $provider)
     {
-        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'mastodon'];
+        $allowed = ['twitter', 'facebook', 'linkedin', 'youtube', 'tiktok', 'pinterest'];
         if (!in_array($provider, $allowed)) {
             return redirect()->route('social-accounts.index')
                 ->with('error', "Provider {$provider} is not supported.");
@@ -1143,5 +1143,204 @@ class SocialAccountController extends Controller
 
         return redirect()->route('social-accounts.index')
             ->with('message', "Pinterest board '{$selected['name']}' connected successfully.");
+    }
+
+    /**
+     * Connect a Mastodon account — Step 1: Register OAuth app on the instance.
+     *
+     * Mastodon is federated — each instance (mastodon.social, mas.to, etc)
+     * has its own OAuth app registration. Rather than forcing the user to
+     * manually create an app on their instance, we auto-register one via
+     * POST /api/v1/apps. The returned client_id + client_secret are stored
+     * in session (not in DB, since they're instance-wide not user-specific),
+     * and user is redirected to the instance's authorize endpoint.
+     *
+     * Required input: instance_url (e.g. https://mastodon.social)
+     */
+    public function connectMastodon(Request $request)
+    {
+        $validated = $request->validate([
+            'instance_url' => 'required|string|url|max:255',
+        ]);
+
+        $instanceUrl = rtrim($validated['instance_url'], '/');
+        $userId = $request->user()->id;
+
+        // Validate URL is reachable + is a Mastodon instance
+        try {
+            $registerResponse = Http::post("{$instanceUrl}/api/v1/apps", [
+                'client_name' => config('app.name', 'Remixpost'),
+                'redirect_uris' => url('/integrations/social/mastodon'),
+                'scopes' => 'read write',
+                'website' => config('app.url'),
+            ]);
+
+            if (!$registerResponse->ok()) {
+                return back()->with('error', "Failed to register app on {$instanceUrl}. Make sure it's a Mastodon instance. Response: " . $registerResponse->body());
+            }
+
+            $appData = $registerResponse->json();
+            $clientId = $appData['client_id'] ?? null;
+            $clientSecret = $appData['client_secret'] ?? null;
+
+            if (!$clientId || !$clientSecret) {
+                return back()->with('error', "Instance did not return client_id/client_secret. Response: " . json_encode($appData));
+            }
+        } catch (\Exception $e) {
+            return back()->with('error', "Cannot reach {$instanceUrl}: " . $e->getMessage());
+        }
+
+        // Store in session for callback
+        session([
+            'mastodon_instance' => $instanceUrl,
+            'mastodon_client_id' => $clientId,
+            'mastodon_client_secret' => $clientSecret,
+            'oauth_user_id' => $userId,
+        ]);
+
+        // Build authorize URL
+        $state = \Illuminate\Support\Str::random(32);
+        session(['mastodon_state' => $state]);
+
+        $authorizeUrl = "{$instanceUrl}/oauth/authorize?" . http_build_query([
+            'client_id' => $clientId,
+            'redirect_uri' => url('/integrations/social/mastodon'),
+            'response_type' => 'code',
+            'scope' => 'read write',
+            'state' => $state,
+        ]);
+
+        return redirect($authorizeUrl);
+    }
+
+    /**
+     * Mastodon OAuth callback handler — NOT routed via handleProviderCallback
+     * because Mastodon is no longer in the $allowed list (we removed it from
+     * Socialite). This method is called directly by a dedicated route.
+     *
+     * Exchanges authorization code for access token, fetches user account
+     * info, stores SocialAccount with instance_url in metadata.
+     */
+    public function handleMastodonCallback(Request $request)
+    {
+        if ($request->has('error')) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Mastodon authorization was cancelled: ' . $request->get('error_description', $request->get('error')));
+        }
+
+        $instanceUrl = session('mastodon_instance');
+        $clientId = session('mastodon_client_id');
+        $clientSecret = session('mastodon_client_secret');
+        $expectedState = session('mastodon_state');
+        $userId = session('oauth_user_id', $request->user() ? $request->user()->id : null);
+
+        if (!$instanceUrl || !$clientId || !$clientSecret) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Mastodon session expired. Please try connecting again.');
+        }
+
+        // Validate state to prevent CSRF
+        $state = $request->get('state');
+        if (!$state || $state !== $expectedState) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Invalid state parameter. Please try connecting again.');
+        }
+
+        $code = $request->get('code');
+        if (!$code) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'No authorization code received from Mastodon.');
+        }
+
+        // Exchange code for access token
+        try {
+            $tokenResponse = Http::asForm()->post("{$instanceUrl}/oauth/token", [
+                'grant_type' => 'authorization_code',
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'redirect_uri' => url('/integrations/social/mastodon'),
+                'code' => $code,
+                'scope' => 'read write',
+            ]);
+
+            if (!$tokenResponse->ok()) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Failed to exchange code for token: ' . $tokenResponse->body());
+            }
+
+            $tokenData = $tokenResponse->json();
+            $accessToken = $tokenData['access_token'] ?? null;
+
+            if (!$accessToken) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Mastodon did not return access token.');
+            }
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Token exchange failed: ' . $e->getMessage());
+        }
+
+        // Fetch user account info
+        try {
+            $verifyResponse = Http::withToken($accessToken)
+                ->get("{$instanceUrl}/api/v1/accounts/verify_credentials");
+
+            if (!$verifyResponse->ok()) {
+                return redirect()->route('social-accounts.index')
+                    ->with('error', 'Failed to verify Mastodon credentials: ' . $verifyResponse->body());
+            }
+
+            $account = $verifyResponse->json();
+            $accountId = (string) ($account['id'] ?? '');
+            $username = $account['username'] ?? 'unknown';
+            $displayName = $account['display_name'] ?? $username;
+            $avatar = $account['avatar'] ?? null;
+            $fullHandle = "@{$username}@" . parse_url($instanceUrl, PHP_URL_HOST);
+        } catch (\Exception $e) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Failed to fetch Mastodon account info: ' . $e->getMessage());
+        }
+
+        if (!$accountId) {
+            return redirect()->route('social-accounts.index')
+                ->with('error', 'Mastodon did not return account ID.');
+        }
+
+        // Store SocialAccount with instance_url + client_id/secret in metadata.
+        // We store client_id/secret in metadata so future token refreshes can
+        // use them (Mastodon tokens don't expire by default, but we keep them
+        // for safety).
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'mastodon',
+                'provider_id' => "{$instanceUrl}:{$accountId}",
+            ],
+            [
+                'user_id' => $userId,
+                'name' => $displayName,
+                'username' => $fullHandle,
+                'avatar' => $avatar,
+                'access_token' => $accessToken,
+                'refresh_token' => null,
+                'expires_at' => null, // Mastodon tokens don't expire by default
+                'is_active' => true,
+                'metadata' => [
+                    'instance_url' => $instanceUrl,
+                    'account_id' => $accountId,
+                    'username' => $username,
+                    'client_id' => $clientId,
+                    'client_secret' => $clientSecret,
+                ],
+            ]
+        );
+
+        // Clear session
+        session()->forget([
+            'mastodon_instance', 'mastodon_client_id', 'mastodon_client_secret',
+            'mastodon_state', 'oauth_user_id',
+        ]);
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Mastodon account '{$fullHandle}' connected successfully.");
     }
 }
