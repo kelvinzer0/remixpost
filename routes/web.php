@@ -29,18 +29,19 @@ Route::middleware('auth')->group(function () {
     Route::get('/social-accounts', [SocialAccountController::class, 'index'])->name('social-accounts.index');
     Route::get('/social-accounts/connect/{provider}', [SocialAccountController::class, 'redirectToProvider'])->name('social-accounts.connect');
 
+    // Mastodon — manual OAuth flow (instance auto-registration, no Socialite).
+    // CRITICAL: must be registered BEFORE the /integrations/social/{provider}
+    // wildcard route below. Laravel matches routes in registration order for
+    // paths with the same pattern — wildcard would catch 'mastodon' literal
+    // and try to dispatch to handleProviderCallback, which rejects it because
+    // 'mastodon' is not in the Socialite allowed list.
+    Route::get('/integrations/social/mastodon', [SocialAccountController::class, 'handleMastodonCallback'])->name('social-accounts.mastodon-callback');
+    Route::post('/integrations/social/connect-mastodon', [SocialAccountController::class, 'connectMastodon'])->name('social-accounts.connect-mastodon');
+
     // Callback URLs — compatible with Postiz pattern for easy migration
     Route::get('/integrations/social/{provider}', [SocialAccountController::class, 'handleProviderCallback'])->name('social-accounts.callback');
     // Legacy callback URL (backward compatible with existing remixpost setups)
     Route::get('/social-accounts/callback/{provider}', [SocialAccountController::class, 'handleProviderCallback']);
-
-    // Mastodon — manual OAuth flow (instance auto-registration, no Socialite).
-    // These routes must come AFTER /integrations/social/{provider} but they
-    // use literal paths so Laravel will match them before the wildcard.
-    // /integrations/social/mastodon is GET (callback from instance OAuth)
-    // while /integrations/social/connect-mastodon is POST (initiate flow).
-    Route::get('/integrations/social/mastodon', [SocialAccountController::class, 'handleMastodonCallback'])->name('social-accounts.mastodon-callback');
-    Route::post('/integrations/social/connect-mastodon', [SocialAccountController::class, 'connectMastodon'])->name('social-accounts.connect-mastodon');
 
     Route::post('/integrations/social/select-facebook-page', [SocialAccountController::class, 'selectFacebookPage'])->name('social-accounts.select-facebook-page');
     Route::post('/integrations/social/select-pinterest-board', [SocialAccountController::class, 'selectPinterestBoard'])->name('social-accounts.select-pinterest-board');
