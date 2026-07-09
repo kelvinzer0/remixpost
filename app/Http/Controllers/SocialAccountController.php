@@ -1382,11 +1382,21 @@ class SocialAccountController extends Controller
             return back()->with('error', 'Invalid Discord webhook URL. Expected format: https://discord.com/api/webhooks/{id}/{token}');
         }
 
-        // Fetch webhook metadata to validate it's a real, working webhook
-        try {
-            $response = Http::get($webhookUrl);
+        // Fetch webhook metadata to validate it's a real, working webhook.
+        // Use retry logic because Discord API or DNS resolution can be flaky
+        // transiently — first request may timeout, second succeeds.
+        $maxRetries = 3;
+        $response = null;
+        $lastError = null;
 
-            if (!$response->ok()) {
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $response = Http::timeout(30)->connectTimeout(15)->get($webhookUrl);
+
+                if ($response->ok()) {
+                    break; // success, exit retry loop
+                }
+
                 $status = $response->status();
                 $body = $response->body();
                 if ($status === 401 || $status === 403) {
@@ -1395,8 +1405,27 @@ class SocialAccountController extends Controller
                     return back()->with('error', 'Webhook not found — it may have been deleted. Create a new one in Discord.');
                 }
                 return back()->with('error', "Failed to validate webhook (HTTP {$status}): {$body}");
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                $lastError = $e->getMessage();
+                \Illuminate\Support\Facades\Log::warning("Discord webhook validation attempt {$attempt}/{$maxRetries} failed", [
+                    'error' => $lastError,
+                ]);
+                if ($attempt < $maxRetries) {
+                    sleep(2); // wait 2s before retry
+                }
+            } catch (\Exception $e) {
+                $lastError = $e->getMessage();
+                if ($attempt < $maxRetries) {
+                    sleep(2);
+                }
             }
+        }
 
+        if (!$response || !$response->ok()) {
+            return back()->with('error', "Cannot reach Discord after {$maxRetries} attempts. Last error: {$lastError}. Please try again — this is usually a transient network issue. If it persists, check your server's internet connection and DNS resolution for discord.com.");
+        }
+
+        try {
             $webhook = $response->json();
             $webhookId = (string) ($webhook['id'] ?? '');
             $webhookName = $webhook['name'] ?? 'Discord Webhook';
@@ -1408,7 +1437,7 @@ class SocialAccountController extends Controller
                 return back()->with('error', 'Webhook response did not include ID. Invalid webhook?');
             }
         } catch (\Exception $e) {
-            return back()->with('error', 'Cannot reach Discord to validate webhook: ' . $e->getMessage());
+            return back()->with('error', 'Failed to parse Discord webhook response: ' . $e->getMessage());
         }
 
         // Build display name
