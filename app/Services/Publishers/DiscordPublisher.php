@@ -45,9 +45,16 @@ class DiscordPublisher implements PublisherInterface
     public function publish(array $post, array $account): array
     {
         try {
-            $webhookUrl = $account['provider_id']; // Full webhook URL
+            $webhookUrl = $account['provider_id'];
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+
+            // Append tags as #hashtags to content
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . "\n\n" . $tagStr;
+            }
 
             // Validate webhook URL format
             if (!preg_match('#^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$#', $webhookUrl)) {

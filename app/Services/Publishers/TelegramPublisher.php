@@ -39,10 +39,17 @@ class TelegramPublisher implements PublisherInterface
     public function publish(array $post, array $account): array
     {
         try {
-            $botToken = $account['access_token']; // Bot token stored as access_token
-            $chatId = $account['provider_id']; // @channelusername or -100... chat ID
+            $botToken = $account['access_token'];
+            $chatId = $account['provider_id'];
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+
+            // Append tags as #hashtags to content
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . "\n\n" . $tagStr;
+            }
 
             $apiBase = "https://api.telegram.org/bot{$botToken}";
 

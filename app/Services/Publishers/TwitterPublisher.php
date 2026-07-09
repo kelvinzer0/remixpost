@@ -37,6 +37,13 @@ class TwitterPublisher implements PublisherInterface
             $accessToken = $account['access_token'];
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+
+            // Append tags as #hashtags to content
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . ' ' . $tagStr;
+            }
 
             // Upload media if any (Twitter API v1.1 media endpoint)
             $mediaIds = [];

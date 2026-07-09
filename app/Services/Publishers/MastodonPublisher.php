@@ -42,7 +42,6 @@ class MastodonPublisher implements PublisherInterface
         try {
             $accessToken = $account['access_token'];
 
-            // Read instance URL from metadata (preferred) or fallback to old config
             $metadata = is_string($account['metadata'] ?? null)
                 ? json_decode($account['metadata'], true) ?? []
                 : ($account['metadata'] ?? []);
@@ -53,6 +52,13 @@ class MastodonPublisher implements PublisherInterface
             $instance = rtrim($instance, '/');
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+
+            // Append tags as #hashtags to content
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . "\n\n" . $tagStr;
+            }
 
             // Mastodon toot limit is 500 chars by default (instance-dependent).
             // Truncate to 500 to be safe across instances.

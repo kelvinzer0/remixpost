@@ -47,9 +47,17 @@ class FacebookPublisher implements PublisherInterface
     {
         try {
             $pageAccessToken = $account['access_token'];
-            $pageId = $account['provider_id']; // Facebook Page ID
+            $pageId = $account['provider_id'];
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+            $firstComment = $post['first_comment'] ?? null;
+
+            // Append tags as #hashtags to content
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . "\n\n" . $tagStr;
+            }
 
             $baseUrl = "https://graph.facebook.com/{$this->apiVersion}/{$pageId}";
 
@@ -63,45 +71,67 @@ class FacebookPublisher implements PublisherInterface
             $images = $categorized['images'];
             $videos = $categorized['videos'];
 
+            $result = null;
             // Single video → /videos endpoint
             if (count($videos) === 1 && empty($images)) {
-                return $this->publishSingleVideo($baseUrl, $content, $videos[0], $pageAccessToken);
+                $result = $this->publishSingleVideo($baseUrl, $content, $videos[0], $pageAccessToken);
             }
-
             // Single image → /photos with published=true
-            if (count($images) === 1 && empty($videos)) {
-                return $this->publishSinglePhoto($baseUrl, $content, $images[0], $pageAccessToken);
+            elseif (count($images) === 1 && empty($videos)) {
+                $result = $this->publishSinglePhoto($baseUrl, $content, $images[0], $pageAccessToken);
             }
-
-            // Multiple videos → publish first as /videos (Facebook doesn't support multi-video post)
-            // Subsequent videos are skipped with warning (FB API limitation)
-            if (count($videos) > 1 && empty($images)) {
+            // Multiple videos → publish first
+            elseif (count($videos) > 1 && empty($images)) {
                 $result = $this->publishSingleVideo($baseUrl, $content, $videos[0], $pageAccessToken);
                 if ($result['success']) {
-                    $result['warning'] = 'Facebook only supports one video per post. Only the first video was published; ' . (count($videos) - 1) . ' video(s) skipped.';
+                    $result['warning'] = 'Facebook only supports one video per post.';
                 }
-                return $result;
+            }
+            // Multiple images
+            elseif (count($images) > 1 && empty($videos)) {
+                $result = $this->publishMultiPhotos($baseUrl, $content, $images, $pageAccessToken);
+            }
+            // Mixed
+            elseif (!empty($videos) && !empty($images)) {
+                $result = $this->publishMixedMedia($baseUrl, $content, $videos, $images, $pageAccessToken);
+            }
+            // Text only
+            else {
+                $result = $this->publishTextOnly($baseUrl, $content, $pageAccessToken);
             }
 
-            // Multiple images (no video) → stage + /feed with attached_media
-            if (count($images) > 1 && empty($videos)) {
-                return $this->publishMultiPhotos($baseUrl, $content, $images, $pageAccessToken);
+            // Post first comment if provided and main post succeeded
+            if ($result['success'] && $firstComment && isset($result['external_id'])) {
+                $commentResult = $this->postFacebookComment($baseUrl, $result['external_id'], $firstComment, $pageAccessToken);
+                $result['info'] = $commentResult;
             }
 
-            // Mixed images + videos → publish first video via /videos, images as separate /photos
-            // (Facebook has no API for mixed-media posts)
-            if (!empty($videos) && !empty($images)) {
-                return $this->publishMixedMedia($baseUrl, $content, $videos, $images, $pageAccessToken);
-            }
-
-            // Fallback (should not reach here)
-            return $this->publishTextOnly($baseUrl, $content, $pageAccessToken);
+            return $result;
 
         } catch (Exception $e) {
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Post a comment on a Facebook post (for first_comment feature).
+     */
+    private function postFacebookComment(string $baseUrl, string $postId, string $message, string $accessToken): string
+    {
+        try {
+            sleep(3); // wait for post to be indexed
+            $this->httpClient->post("https://graph.facebook.com/{$this->apiVersion}/{$postId}/comments", [
+                'form_params' => [
+                    'message' => $message,
+                    'access_token' => $accessToken,
+                ],
+            ]);
+            return 'First comment posted';
+        } catch (Exception $e) {
+            return 'First comment failed (non-critical): ' . $e->getMessage();
         }
     }
 

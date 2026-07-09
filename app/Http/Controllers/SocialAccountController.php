@@ -1726,12 +1726,18 @@ class SocialAccountController extends Controller
     /**
      * Step 4: User selected channels. Store each as SocialAccount.
      * Multi-select — user can connect multiple channels (FB + IG + X + LinkedIn) at once.
+     * Also stores per-channel config:
+     *   - Pinterest: pinterest_board_id (selected from board picker)
+     *   - Instagram: instagram_post_type (post/reel/story)
      */
     public function selectBufferChannel(Request $request)
     {
         $validated = $request->validate([
             'channel_ids' => 'required|array|min:1',
             'channel_ids.*' => 'required|string',
+            'channel_configs' => 'nullable|array',
+            'channel_configs.*.pinterest_board_id' => 'nullable|string',
+            'channel_configs.*.instagram_post_type' => 'nullable|string|in:post,reel,story',
         ]);
 
         $accessToken = session('buffer_access_token');
@@ -1746,16 +1752,7 @@ class SocialAccountController extends Controller
                 ->with('error', 'Buffer session expired. Please try connecting again.');
         }
 
-        // Fetch all channels again to get full info (we need service + name)
-        $orgId = null;
-        if (count($organizations) === 1) {
-            $orgId = $organizations[0]['id'];
-        } else {
-            // Multi-org case: pick first one (user already selected in previous step,
-            // but we stored all orgs in session — for simplicity, use the one that
-            // matches the channels they selected)
-            $orgId = $organizations[0]['id'];
-        }
+        $orgId = count($organizations) === 1 ? $organizations[0]['id'] : ($organizations[0]['id'] ?? null);
 
         $channelsQuery = 'query GetChannels($orgId: OrganizationId!) {
   channels(input: { organizationId: $orgId, filter: { isLocked: false } }) {
@@ -1774,6 +1771,7 @@ class SocialAccountController extends Controller
                 ->with('error', 'Failed to fetch channels for storage: ' . $e->getMessage());
         }
 
+        $channelConfigs = $validated['channel_configs'] ?? [];
         $connectedCount = 0;
         $connectedNames = [];
         foreach ($validated['channel_ids'] as $channelId) {
@@ -1783,6 +1781,26 @@ class SocialAccountController extends Controller
             $service = $ch['service'] ?? 'unknown';
             $displayName = $ch['displayName'] ?? $ch['name'] ?? "Buffer {$service}";
             $name = "{$displayName} (Buffer → {$service})";
+
+            // Build metadata — include per-channel config
+            $metadata = [
+                'channel_id' => $channelId,
+                'channel_service' => $service,
+                'channel_name' => $ch['name'] ?? $displayName,
+                'channel_display_name' => $displayName,
+                'organization_id' => $orgId,
+                'buffer_account_email' => $account['email'] ?? null,
+            ];
+
+            // Add Pinterest board ID if provided
+            if ($service === 'pinterest' && !empty($channelConfigs[$channelId]['pinterest_board_id'])) {
+                $metadata['pinterest_board_id'] = $channelConfigs[$channelId]['pinterest_board_id'];
+            }
+
+            // Add Instagram post type if provided
+            if ($service === 'instagram' && !empty($channelConfigs[$channelId]['instagram_post_type'])) {
+                $metadata['instagram_post_type'] = $channelConfigs[$channelId]['instagram_post_type'];
+            }
 
             SocialAccount::updateOrCreate(
                 [
@@ -1798,14 +1816,7 @@ class SocialAccountController extends Controller
                     'refresh_token' => $refreshToken,
                     'expires_at' => $expiresIn ? now()->addSeconds($expiresIn) : null,
                     'is_active' => true,
-                    'metadata' => [
-                        'channel_id' => $channelId,
-                        'channel_service' => $service,
-                        'channel_name' => $ch['name'] ?? $displayName,
-                        'channel_display_name' => $displayName,
-                        'organization_id' => $orgId,
-                        'buffer_account_email' => $account['email'] ?? null,
-                    ],
+                    'metadata' => $metadata,
                 ]
             );
             $connectedCount++;
@@ -1824,5 +1835,80 @@ class SocialAccountController extends Controller
 
         return redirect()->route('social-accounts.index')
             ->with('message', $msg);
+    }
+
+    /**
+     * Fetch Pinterest boards for a Buffer channel via GraphQL.
+     * Called by frontend when user selects a Pinterest channel during Buffer connect.
+     *
+     * POST /ai/buffer-pinterest-boards
+     * Body: { channel_id: string }
+     * Returns: { boards: [{ serviceId, name }] }
+     */
+    public function fetchBufferPinterestBoards(Request $request)
+    {
+        $validated = $request->validate([
+            'channel_id' => 'required|string',
+        ]);
+
+        $channelId = $validated['channel_id'];
+        $accessToken = session('buffer_access_token');
+
+        if (!$accessToken) {
+            return response()->json(['error' => 'Buffer session expired'], 401);
+        }
+
+        // Query Buffer GraphQL for channel metadata (Pinterest boards)
+        $query = 'query GetChannelBoards($channelId: ChannelId!) {
+  channel(input: { id: $channelId }) {
+    id
+    name
+    service
+    metadata {
+      ... on PinterestMetadata {
+        boards {
+          serviceId
+          name
+        }
+      }
+    }
+  }
+}';
+
+        try {
+            $response = Http::withToken($accessToken)
+                ->post(config('services.buffer.api_url'), [
+                    'query' => $query,
+                    'variables' => ['channelId' => $channelId],
+                ]);
+
+            $body = $response->json();
+
+            if (isset($body['errors']) && !empty($body['errors'])) {
+                return response()->json([
+                    'error' => 'Buffer API error: ' . ($body['errors'][0]['message'] ?? 'Unknown'),
+                ], 400);
+            }
+
+            $channel = $body['data']['channel'] ?? null;
+            if (!$channel) {
+                return response()->json(['error' => 'Channel not found'], 404);
+            }
+
+            // Extract boards from metadata
+            $boards = [];
+            $metadata = $channel['metadata'] ?? null;
+            if ($metadata && is_array($metadata)) {
+                // PinterestMetadata has boards array
+                $boards = $metadata['boards'] ?? [];
+            }
+
+            return response()->json([
+                'boards' => $boards,
+                'channel_name' => $channel['name'] ?? '',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to fetch boards: ' . $e->getMessage()], 500);
+        }
     }
 }

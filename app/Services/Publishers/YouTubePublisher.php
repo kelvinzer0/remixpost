@@ -89,7 +89,9 @@ class YouTubePublisher implements PublisherInterface
             $title = mb_substr($content, 0, 100);
             $description = mb_substr($content, 0, 4900);
 
-            $tags = [];
+            // Tags from post + mode-specific tags
+            $postTags = $post['tags'] ?? [];
+            $tags = $postTags;
             $categoryId = '22'; // People & Blogs (default)
 
             if ($uploadMode === 'short') {
@@ -97,7 +99,7 @@ class YouTubePublisher implements PublisherInterface
                 if (!str_contains($description, '#shorts')) {
                     $description = rtrim($description) . "\n\n#shorts";
                 }
-                $tags = ['shorts', 'short', 'youtube shorts'];
+                $tags = array_merge(['shorts', 'short', 'youtube shorts'], $postTags);
                 $categoryId = '24'; // Entertainment (commonly used for Shorts)
 
                 // Pre-upload validation: check if video meets Shorts criteria.

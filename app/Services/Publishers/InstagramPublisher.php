@@ -41,9 +41,17 @@ class InstagramPublisher implements PublisherInterface
     {
         try {
             $accessToken = $account['access_token'];
-            $igUserId = $account['provider_id']; // Instagram Business Account ID
+            $igUserId = $account['provider_id'];
             $caption = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+            $firstComment = $post['first_comment'] ?? null;
+
+            // Append tags as #hashtags to caption
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $caption = rtrim($caption) . "\n\n" . $tagStr;
+            }
 
             // Instagram requires at least one media item
             if (empty($mediaUrls)) {
@@ -177,9 +185,32 @@ class InstagramPublisher implements PublisherInterface
             return ['success' => false, 'error' => 'Instagram did not return published media ID'];
         }
 
+        $mediaId = $publishBody['id'];
+        $info = null;
+
+        // Post first comment if provided (IG supports comments via Graph API)
+        if ($firstComment) {
+            try {
+                sleep(5); // wait for media to be fully published
+                $commentResponse = $this->httpClient->post(
+                    "https://graph.facebook.com/v18.0/{$mediaId}/comments",
+                    [
+                        'form_params' => [
+                            'message' => $firstComment,
+                            'access_token' => $accessToken,
+                        ],
+                    ]
+                );
+                $info = 'First comment posted';
+            } catch (\Exception $e) {
+                $info = 'First comment failed (non-critical): ' . $e->getMessage();
+            }
+        }
+
         return [
             'success' => true,
-            'external_id' => $publishBody['id'],
+            'external_id' => $mediaId,
+            'info' => $info,
         ];
     }
 

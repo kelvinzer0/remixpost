@@ -77,4 +77,7 @@ Route::middleware('auth')->group(function () {
     // AI Caption Generator
     Route::post('/ai/caption', [\App\Http\Controllers\AICaptionController::class, 'generate'])->name('ai.caption.generate');
     Route::get('/ai/tones', [\App\Http\Controllers\AICaptionController::class, 'tones'])->name('ai.tones');
+
+    // Buffer Pinterest boards fetcher (proxied GraphQL call)
+    Route::post('/ai/buffer-pinterest-boards', [\App\Http\Controllers\SocialAccountController::class, 'fetchBufferPinterestBoards'])->name('social-accounts.buffer-pinterest-boards');
 });

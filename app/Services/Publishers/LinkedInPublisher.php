@@ -55,9 +55,17 @@ class LinkedInPublisher implements PublisherInterface
     {
         try {
             $accessToken = $account['access_token'];
-            $authorUrn = $account['provider_id']; // urn:li:person:{id} or urn:li:organization:{id}
+            $authorUrn = $account['provider_id'];
             $content = $post['content'];
             $mediaUrls = $post['media_urls'] ?? [];
+            $tags = $post['tags'] ?? [];
+            $firstComment = $post['first_comment'] ?? null;
+
+            // Append tags as #hashtags to commentary
+            if (!empty($tags)) {
+                $tagStr = implode(' ', array_map(fn($t) => '#' . preg_replace('/[^a-zA-Z0-9_]/', '', $t), $tags));
+                $content = rtrim($content) . "\n\n" . $tagStr;
+            }
 
             // Ensure author URN format
             if (!str_starts_with($authorUrn, 'urn:')) {
@@ -156,9 +164,16 @@ class LinkedInPublisher implements PublisherInterface
                 return ['success' => false, 'error' => 'LinkedIn did not return post ID', 'response' => $body];
             }
 
+            // Post first comment if provided (LinkedIn supports comments on posts)
+            $info = null;
+            if ($firstComment) {
+                $info = $this->postFirstComment($externalId, $firstComment, $accessToken);
+            }
+
             return [
                 'success' => true,
                 'external_id' => $externalId,
+                'info' => $info,
             ];
         } catch (\GuzzleHttp\Exception\ClientException $e) {
             $resp = $e->getResponse();
@@ -444,6 +459,30 @@ class LinkedInPublisher implements PublisherInterface
         }
 
         throw new Exception("Timed out waiting for LinkedIn {$type} to become AVAILABLE (10 min max)");
+    }
+
+    /**
+     * Post a comment on a LinkedIn post (for first_comment feature).
+     * Uses POST /rest/comments with socialDetail URN.
+     */
+    private function postFirstComment(string $postUrn, string $text, string $accessToken): ?string
+    {
+        try {
+            // Wait 3s to ensure post is fully indexed
+            sleep(3);
+
+            $response = $this->httpClient->post('https://api.linkedin.com/rest/comments', [
+                'headers' => $this->apiHeaders($accessToken),
+                'json' => [
+                    'actor' => 'urn:li:person:' . basename($postUrn), // best-effort
+                    'message' => ['text' => $text],
+                    'socialDetail' => $postUrn,
+                ],
+            ]);
+            return 'First comment posted';
+        } catch (Exception $e) {
+            return 'First comment failed (non-critical): ' . $e->getMessage();
+        }
     }
 
     /**
