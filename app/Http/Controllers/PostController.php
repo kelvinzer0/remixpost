@@ -217,4 +217,35 @@ class PostController extends Controller
         return redirect()->route('posts.index')
             ->with('message', 'Post deleted.');
     }
+
+    /**
+     * Duplicate/clone a post — creates a new post with same content, media,
+     * tags, first_comment, alt_text, account_overrides, and social accounts.
+     * Status set to 'draft' so user can edit before scheduling.
+     * Redirects to edit page of the new post.
+     */
+    public function duplicate(Request $request, int $id)
+    {
+        $post = $request->user()->posts()->with('socialAccounts')->findOrFail($id);
+
+        $clone = $request->user()->posts()->create([
+            'content' => $post->content,
+            'media_urls' => $post->media_urls ?? [],
+            'tags' => $post->tags ?? [],
+            'first_comment' => $post->first_comment,
+            'alt_text' => $post->alt_text,
+            'account_overrides' => $post->account_overrides,
+            'scheduled_at' => null,
+            'status' => Post::STATUS_DRAFT,
+        ]);
+
+        // Copy social account associations
+        $accountIds = $post->socialAccounts->pluck('id')->toArray();
+        if (!empty($accountIds)) {
+            $clone->socialAccounts()->sync($accountIds);
+        }
+
+        return redirect()->route('posts.edit', $clone->id)
+            ->with('message', 'Post duplicated. Edit and schedule when ready.');
+    }
 }

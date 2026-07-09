@@ -67,6 +67,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/social-accounts/{id}', [SocialAccountController::class, 'destroy'])->name('social-accounts.destroy');
 
     Route::resource('posts', PostController::class);
+    Route::post('/posts/{id}/duplicate', [PostController::class, 'duplicate'])->name('posts.duplicate');
 
     Route::get('/media', [\App\Http\Controllers\MediaController::class, 'index'])->name('media.index');
     Route::post('/media', [\App\Http\Controllers\MediaController::class, 'store'])->name('media.store');

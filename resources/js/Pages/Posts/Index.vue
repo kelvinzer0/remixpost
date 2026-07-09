@@ -114,6 +114,8 @@ const getProviderColor = (provider) => providerColors[provider] || 'bg-gray-500'
                             <Link v-if="['draft', 'scheduled', 'failed'].includes(post.status)"
                                 :href="`/posts/${post.id}/edit`"
                                 class="text-indigo-600 hover:text-indigo-900">Edit</Link>
+                            <Link :href="`/posts/${post.id}/duplicate`" method="post" as="button"
+                                class="text-green-600 hover:text-green-900">Duplicate</Link>
                             <Link :href="`/posts/${post.id}`" method="delete" as="button"
                                 class="text-red-600 hover:text-red-900"
                                 onclick="return confirm('Delete this post?')">Delete</Link>
@@ -170,6 +172,8 @@ const getProviderColor = (provider) => providerColors[provider] || 'bg-gray-500'
                         <Link v-if="['draft', 'scheduled', 'failed'].includes(post.status)"
                             :href="`/posts/${post.id}/edit`"
                             class="text-indigo-600 font-medium">Edit</Link>
+                        <Link :href="`/posts/${post.id}/duplicate`" method="post" as="button"
+                            class="text-green-600 font-medium">Clone</Link>
                         <Link :href="`/posts/${post.id}`" method="delete" as="button"
                             class="text-red-600 font-medium"
                             onclick="return confirm('Delete this post?')">Del</Link>
