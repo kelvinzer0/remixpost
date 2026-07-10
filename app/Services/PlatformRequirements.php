@@ -114,17 +114,17 @@ class PlatformRequirements
                 'label' => 'TikTok',
                 'color' => 'bg-black',
                 'requires_media' => true,
-                'media_type' => 'video',
+                'media_type' => null, // null = accept either image or video
                 'allows_text_only' => false,
-                'supports_image' => false,
+                'supports_image' => true, // photo carousel via Content Posting API
                 'supports_video' => true,
                 'supports_pdf' => false,
                 'supports_tags' => true,
                 'supports_first_comment' => false,
                 'max_content_length' => 2200,
                 'max_media_size_mb' => 287,
-                'max_media_count' => 1,
-                'notes' => 'REQUIRES video. Tags appended to caption.',
+                'max_media_count' => 35, // TikTok photo post: up to 35 images
+                'notes' => 'REQUIRES image(s) atau video. Image-only: photo carousel (up to 35). Video: single video. Tags appended to caption.',
             ],
             'pinterest' => [
                 'label' => 'Pinterest',
