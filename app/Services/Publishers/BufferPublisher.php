@@ -243,10 +243,18 @@ class BufferPublisher implements PublisherInterface
             }
         }
 
-        // Instagram post type (post/reel/story) — from channel metadata
-        if ($channelService === 'instagram' && !empty($accountMetadata['instagram_post_type'])) {
-            $postType = $accountMetadata['instagram_post_type'];
-            $parts[] = "instagram: { postType: {$postType }" . (!empty($firstComment) ? ", firstComment: " . json_encode($firstComment) : '') . " }";
+        // Instagram post type (post/reel/story) — from channel metadata or per-post override
+        // Stored as 'instagram_post_type' in overrides, but Buffer GraphQL expects 'type' field
+        // inside InstagramPostMetadataInput.
+        if ($channelService === 'instagram') {
+            $postType = $accountMetadata['instagram_post_type'] ?? null;
+            if ($postType) {
+                $igParts = ["type: {$postType}"];
+                if (!empty($firstComment)) {
+                    $igParts[] = "firstComment: " . json_encode($firstComment);
+                }
+                $parts[] = "instagram: { " . implode(', ', $igParts) . " }";
+            }
         }
 
         // Twitter threads — if firstComment provided, treat as thread reply
