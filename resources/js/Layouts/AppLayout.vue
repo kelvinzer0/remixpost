@@ -1,8 +1,14 @@
 <script setup>
-import { Link } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const showingNavigationDropdown = ref(false);
+
+const logoutForm = useForm({});
+
+const logout = () => {
+    logoutForm.post('/logout');
+};
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -32,11 +38,15 @@ const navigation = [
                     {{ item.name }}
                 </Link>
             </nav>
-            <div class="p-3 border-t border-gray-200">
+            <div class="p-3 border-t border-gray-200 space-y-2">
                 <Link href="/posts/create"
                     class="block w-full px-4 py-2 text-sm font-medium text-center text-white bg-brand-600 rounded-md hover:bg-brand-700">
                     + New Post
                 </Link>
+                <button @click="logout"
+                    class="block w-full px-4 py-2 text-sm font-medium text-center text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200">
+                    Logout
+                </button>
             </div>
         </aside>
 
@@ -58,6 +68,10 @@ const navigation = [
                     @click="showingNavigationDropdown = false">
                     {{ item.name }}
                 </Link>
+                <button @click="logout"
+                    class="block w-full text-left px-3 py-2 text-sm font-medium text-gray-700 rounded-md hover:bg-gray-100">
+                    Logout
+                </button>
             </div>
         </div>
 
@@ -75,6 +89,10 @@ const navigation = [
                         class="px-3 py-1.5 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700">
                         + New Post
                     </Link>
+                    <button @click="logout"
+                        class="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200">
+                        Logout
+                    </button>
                 </div>
             </header>
             <main class="p-4 md:p-6">
