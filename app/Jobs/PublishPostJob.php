@@ -53,6 +53,12 @@ class PublishPostJob implements ShouldQueue
         $post->update(['status' => Post::STATUS_PUBLISHING]);
 
         try {
+            Log::info("PublishPostJob starting", [
+                'post_id' => $post->id,
+                'account_id' => $account->id,
+                'provider' => $account->provider,
+            ]);
+
             $publisher = PublisherFactory::make($account->provider);
 
             // Compress media if it exceeds this platform's max size limit.
@@ -85,6 +91,14 @@ class PublishPostJob implements ShouldQueue
                 'metadata' => $account->metadata,
             ]);
 
+            Log::info("PublishPostJob publish result", [
+                'post_id' => $post->id,
+                'account_id' => $account->id,
+                'success' => $result['success'] ?? false,
+                'external_id' => $result['external_id'] ?? null,
+                'error' => $result['error'] ?? null,
+            ]);
+
             // Update pivot table with result
             // Note: even on success, we may attach a warning/info message in
             // failure_reason field (prefixed with [INFO] or [WARNING]) so the
@@ -111,13 +125,24 @@ class PublishPostJob implements ShouldQueue
         } catch (\Exception $e) {
             Log::error("PublishPostJob failed", [
                 'post_id' => $post->id,
-                'account' => $account->provider,
+                'account_id' => $account->id ?? null,
+                'account' => $account->provider ?? 'unknown',
                 'error' => $e->getMessage(),
+                'exception_class' => get_class($e),
+                'trace' => $e->getTraceAsString(),
             ]);
 
-            $post->socialAccounts()->updateExistingPivot($account->id, [
-                'failure_reason' => $e->getMessage(),
-            ]);
+            try {
+                $post->socialAccounts()->updateExistingPivot($account->id, [
+                    'failure_reason' => $e->getMessage(),
+                ]);
+            } catch (\Exception $pivotErr) {
+                Log::error("PublishPostJob pivot update failed too", [
+                    'post_id' => $post->id,
+                    'account_id' => $account->id ?? null,
+                    'pivot_error' => $pivotErr->getMessage(),
+                ]);
+            }
 
             $this->updatePostStatus($post);
         }
@@ -125,34 +150,57 @@ class PublishPostJob implements ShouldQueue
 
     /**
      * Update post status based on all social account pivot results.
+     *
+     * Edge case: if the catch block also failed (e.g. pivot update threw),
+     * some accounts may have NEITHER published_at NOR failure_reason set.
+     * In that case doneCount < totalAccounts, so the post stays in
+     * 'publishing' forever. To avoid that stuck state, we also count
+     * "incomplete" accounts (no published_at, no failure_reason) as
+     * failures when the job reached this method — by definition the
+     * job ended, so any account that didn't get marked as published
+     * must have failed silently.
      */
     private function updatePostStatus(Post $post): void
     {
         $post->refresh();
         $totalAccounts = $post->socialAccounts()->count();
 
-        // An account is considered "done" if it has either:
-        //   - published_at set (success — including partial success with [INFO]/[WARNING] notes)
-        //   - failure_reason set AND published_at is null (real failure)
-        //
-        // IMPORTANT: We must EXCLUDE rows where failure_reason starts with
-        // '[INFO]' or '[WARNING]' from the failed count — those are success
-        // cases with attached notes (e.g. YouTube Shorts criteria info,
-        // Buffer post created but pending). They already have published_at
-        // set so they're counted as published, not failed.
+        // Published: any account with published_at set (success — including
+        // partial success with [INFO]/[WARNING] notes attached as failure_reason).
         $publishedCount = $post->socialAccounts()
             ->wherePivotNotNull('published_at')
             ->count();
 
         // Real failures: published_at IS NULL AND failure_reason is NOT NULL
         // AND failure_reason does NOT start with [INFO] or [WARNING]
-        // (those prefixes are attached to SUCCESS rows as informational notes)
         $failedCount = $post->socialAccounts()
             ->wherePivotNull('published_at')
             ->wherePivotNotNull('failure_reason')
             ->count();
 
-        // Done = all accounts have either published_at OR a real failure
+        // Silent failures: published_at IS NULL AND failure_reason IS NULL.
+        // The job ended without updating this pivot — treat as failed so the
+        // post doesn't stay stuck in 'publishing'.
+        $silentFailCount = $post->socialAccounts()
+            ->wherePivotNull('published_at')
+            ->wherePivotNull('failure_reason')
+            ->count();
+
+        // Mark silent failures with a generic error so the UI shows them
+        // as failed instead of stuck 'publishing'.
+        if ($silentFailCount > 0) {
+            $silentAccountIds = $post->socialAccounts()
+                ->wherePivotNull('published_at')
+                ->wherePivotNull('failure_reason')
+                ->pluck('social_accounts.id');
+            foreach ($silentAccountIds as $sid) {
+                $post->socialAccounts()->updateExistingPivot($sid, [
+                    'failure_reason' => 'Publishing failed (job ended without status)',
+                ]);
+            }
+            $failedCount += $silentFailCount;
+        }
+
         $doneCount = $publishedCount + $failedCount;
 
         if ($doneCount >= $totalAccounts) {
