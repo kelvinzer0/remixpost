@@ -20,18 +20,20 @@ const form = useForm({
     notes: '',
 });
 
-// ===== Contact picker (fetch available contacts from Evolution API) =====
+// ===== Contact picker (multi-select with checkboxes) =====
 const availableContacts = ref([]);
 const loadingContacts = ref(false);
 const contactSearch = ref('');
 const contactError = ref('');
 const showContactPicker = ref(false);
+const selectedContacts = ref(new Set()); // track selected JIDs
 
 const fetchContacts = async () => {
     if (!form.social_account_id) return;
     loadingContacts.value = true;
     contactError.value = '';
     availableContacts.value = [];
+    selectedContacts.value = new Set();
     try {
         const response = await fetch('/whatsapp-presence/available-contacts', {
             method: 'POST',
@@ -67,37 +69,59 @@ const filteredContacts = computed(() => {
     );
 });
 
-const selectContact = (contact) => {
-    form.jid = contact.jid;
-    form.phone = contact.phone;
-    form.display_name = contact.name;
-    showContactPicker.value = false;
+const toggleContact = (jid) => {
+    if (selectedContacts.value.has(jid)) {
+        selectedContacts.value.delete(jid);
+    } else {
+        selectedContacts.value.add(jid);
+    }
+    // Trigger reactivity (Set mutation doesn't trigger Vue reactivity by default)
+    selectedContacts.value = new Set(selectedContacts.value);
 };
 
-const onAccountChange = () => {
-    // Reset contact selection when account changes
-    form.jid = '';
-    form.phone = '';
-    form.display_name = '';
-    availableContacts.value = [];
-    contactSearch.value = '';
-    showContactPicker.value = false;
+const selectAllFiltered = () => {
+    const filtered = filteredContacts.value;
+    const allSelected = filtered.every(c => selectedContacts.value.has(c.jid));
+    if (allSelected) {
+        // Deselect all filtered
+        filtered.forEach(c => selectedContacts.value.delete(c.jid));
+    } else {
+        // Select all filtered
+        filtered.forEach(c => selectedContacts.value.add(c.jid));
+    }
+    selectedContacts.value = new Set(selectedContacts.value);
 };
 
-const submit = () => {
-    if (!form.jid) {
-        alert('Pilih kontak dari list dulu. Klik "Load Contacts" untuk fetch list dari WhatsApp.');
+const bulkSubmit = () => {
+    if (selectedContacts.value.size === 0) {
+        alert('Pilih minimal 1 kontak dari list.');
         return;
     }
-    form.post('/whatsapp-presence', {
+    const contacts = Array.from(selectedContacts.value).map(jid => {
+        const c = availableContacts.value.find(x => x.jid === jid);
+        return { jid: c.jid, phone: c.phone, name: c.name };
+    });
+    useForm({
+        social_account_id: form.social_account_id,
+        contacts,
+        consent_method: form.consent_method,
+    }).post('/whatsapp-presence/bulk', {
         onSuccess: () => {
             form.reset();
             form.social_account_id = props.whatsappAccounts[0]?.id || '';
             form.consent_method = 'manual_verbal';
             availableContacts.value = [];
+            selectedContacts.value = new Set();
             showContactPicker.value = false;
         },
     });
+};
+
+const onAccountChange = () => {
+    availableContacts.value = [];
+    selectedContacts.value = new Set();
+    contactSearch.value = '';
+    showContactPicker.value = false;
 };
 
 // ===== Bulk selection (checkbox on consent list) =====
@@ -284,21 +308,27 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
 
                     <p v-if="contactError" class="mt-2 text-xs text-red-600">{{ contactError }}</p>
 
-                    <!-- Contact picker (modal-like inline list) -->
+                    <!-- Contact picker (multi-select with checkboxes) -->
                     <div v-if="showContactPicker && availableContacts.length > 0" class="mt-3 border border-gray-200 rounded-md">
-                        <div class="p-2 bg-gray-50 border-b border-gray-200">
+                        <div class="p-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
                             <input v-model="contactSearch" type="text"
                                 placeholder="🔍 Cari nama / nomor..."
-                                class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
+                                class="flex-1 rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
+                            <button type="button" @click="selectAllFiltered"
+                                class="px-2 py-1 text-xs text-green-700 bg-green-50 rounded hover:bg-green-100 border border-green-200 whitespace-nowrap">
+                                {{ filteredContacts.every(c => selectedContacts.has(c.jid)) ? 'Deselect All' : 'Select All' }}
+                            </button>
                         </div>
                         <p class="px-3 py-1 text-[10px] text-gray-500 bg-gray-50 border-b border-gray-200">
-                            {{ availableContacts.length }} kontak tersedia (sudah exclude yang sudah consent). Klik untuk pilih.
+                            {{ availableContacts.length }} kontak tersedia · {{ selectedContacts.size }} selected
                         </p>
                         <div class="max-h-72 overflow-y-auto divide-y divide-gray-100">
-                            <button v-for="c in filteredContacts" :key="c.jid" type="button"
-                                @click="selectContact(c)"
-                                class="w-full flex items-center gap-2 p-2 hover:bg-green-50 text-left"
-                                :class="form.jid === c.jid ? 'bg-green-100' : ''">
+                            <label v-for="c in filteredContacts" :key="c.jid"
+                                class="w-full flex items-center gap-2 p-2 hover:bg-green-50 cursor-pointer text-left"
+                                :class="selectedContacts.has(c.jid) ? 'bg-green-100' : ''">
+                                <input type="checkbox" :checked="selectedContacts.has(c.jid)"
+                                    @change="toggleContact(c.jid)"
+                                    class="rounded border-gray-300 text-green-600 focus:ring-green-500 flex-shrink-0" />
                                 <img v-if="c.picture" :src="c.picture"
                                     class="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
                                     @error="$event.target.style.display='none'" />
@@ -312,10 +342,7 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
                                     </div>
                                     <p class="text-[10px] text-gray-500 font-mono truncate">{{ c.phone }}</p>
                                 </div>
-                                <svg v-if="form.jid === c.jid" class="w-4 h-4 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                                </svg>
-                            </button>
+                            </label>
                             <p v-if="filteredContacts.length === 0" class="p-3 text-xs text-gray-400 italic text-center">Tidak ada kontak cocok.</p>
                         </div>
                     </div>
@@ -323,56 +350,22 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
                         Tidak ada kontak tersedia. Semua kontak sudah di-consent, atau instance WA tidak punya chat 1:1.
                     </div>
 
-                    <!-- Selected contact display -->
-                    <div v-if="form.jid" class="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
-                        <p class="text-xs text-gray-600 mb-1">Kontak terpilih:</p>
-                        <div class="flex items-center gap-2">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium text-gray-900">{{ form.display_name }}</p>
-                                <p class="text-xs text-gray-500 font-mono">{{ form.phone }}</p>
-                            </div>
-                            <button type="button" @click="onAccountChange"
-                                class="px-2 py-1 text-xs text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50">
-                                Ganti
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                        <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Display Name (auto-filled, editable)</label>
-                            <input v-model="form.display_name" type="text"
-                                placeholder="Akan terisi otomatis dari kontak"
-                                class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Consent Method (opsional)</label>
-                            <select v-model="form.consent_method"
-                                class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500">
-                                <option value="manual_verbal">Verbal (lisan) — default</option>
-                                <option value="written">Tertulis (chat/document)</option>
-                                <option value="qr_scan">QR scan (self-signup)</option>
-                                <option value="self_signup">Self signup form</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                        <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Consent Expires (opsional)</label>
-                            <input v-model="form.consent_expires_at" type="datetime-local"
-                                class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Notes (opsional)</label>
-                            <input v-model="form.notes" type="text"
-                                placeholder="mis. 'customer opt-in via WhatsApp survey 2026-07'"
-                                class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
-                        </div>
+                    <!-- Consent method (simplified — optional) -->
+                    <div class="mt-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1">Consent Method (opsional)</label>
+                        <select v-model="form.consent_method"
+                            class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500">
+                            <option value="manual_verbal">Verbal (lisan) — default</option>
+                            <option value="written">Tertulis (chat/document)</option>
+                            <option value="qr_scan">QR scan (self-signup)</option>
+                            <option value="self_signup">Self signup form</option>
+                        </select>
                     </div>
                     <p v-if="form.errors.phone" class="mt-2 text-xs text-red-600">{{ form.errors.phone }}</p>
-                    <button type="submit" :disabled="form.processing || whatsappAccounts.length === 0 || !form.jid"
+                    <button type="button" @click="bulkSubmit"
+                        :disabled="form.processing || whatsappAccounts.length === 0 || selectedContacts.size === 0"
                         class="mt-3 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50">
-                        {{ form.processing ? 'Adding...' : (form.jid ? '+ Add Consent & Check Now' : '↑ Pilih kontak dulu') }}
+                        {{ form.processing ? 'Adding...' : (selectedContacts.size > 0 ? `+ Add ${selectedContacts.size} Consent(s)` : '↑ Pilih kontak dulu') }}
                     </button>
                 </div>
             </form>

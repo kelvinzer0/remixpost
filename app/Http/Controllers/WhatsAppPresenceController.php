@@ -104,6 +104,60 @@ class WhatsAppPresenceController extends Controller
     }
 
     /**
+     * Bulk add multiple consented contacts at once.
+     * Body: { social_account_id: int, contacts: [{ jid, phone, name }] }
+     */
+    public function bulkStore(Request $request)
+    {
+        $validated = $request->validate([
+            'social_account_id' => 'required|exists:social_accounts,id',
+            'contacts' => 'required|array|min:1',
+            'contacts.*.jid' => 'required|string|max:100|ends_with:@s.whatsapp.net',
+            'contacts.*.phone' => 'nullable|string|max:30',
+            'contacts.*.name' => 'nullable|string|max:200',
+            'consent_method' => 'nullable|string|in:manual_verbal,written,qr_scan,self_signup',
+        ]);
+
+        $account = SocialAccount::findOrFail($validated['social_account_id']);
+        if ($account->user_id !== $request->user()->id || $account->provider !== 'whatsapp') {
+            return response()->json(['error' => 'Invalid WhatsApp account.'], 400);
+        }
+
+        $consentMethod = $validated['consent_method'] ?? 'manual_verbal';
+        $added = 0;
+
+        foreach ($validated['contacts'] as $contact) {
+            $jid = $contact['jid'];
+            $phone = $contact['phone'] ?? str_replace('@s.whatsapp.net', '', $jid);
+            $name = $contact['name'] ?? null;
+
+            $consent = WhatsAppPresenceConsent::updateOrCreate(
+                [
+                    'user_id' => $request->user()->id,
+                    'social_account_id' => $validated['social_account_id'],
+                    'jid' => $jid,
+                ],
+                [
+                    'phone' => $phone,
+                    'display_name' => $name,
+                    'consent_method' => $consentMethod,
+                    'consent_given_at' => now(),
+                    'is_active' => true,
+                ]
+            );
+
+            // Only dispatch check if it's a new consent (not already existed)
+            if ($consent->wasRecentlyCreated) {
+                CheckWhatsAppPresence::dispatch($consent->id)->delay(now()->addSeconds($added * 3));
+            }
+            $added++;
+        }
+
+        return redirect()->route('whatsapp-presence.index')
+            ->with('message', "Added {$added} consent(s). Presence checks dispatched.");
+    }
+
+    /**
      * Revoke consent (soft delete — keeps sample history but stops further checks).
      */
     public function destroy(Request $request, int $id)

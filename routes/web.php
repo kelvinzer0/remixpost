@@ -90,6 +90,7 @@ Route::middleware('auth')->group(function () {
     // WhatsApp presence opt-in tracker
     Route::get('/whatsapp-presence', [\App\Http\Controllers\WhatsAppPresenceController::class, 'index'])->name('whatsapp-presence.index');
     Route::post('/whatsapp-presence', [\App\Http\Controllers\WhatsAppPresenceController::class, 'store'])->name('whatsapp-presence.store');
+    Route::post('/whatsapp-presence/bulk', [\App\Http\Controllers\WhatsAppPresenceController::class, 'bulkStore'])->name('whatsapp-presence.bulk-store');
     Route::delete('/whatsapp-presence/{id}', [\App\Http\Controllers\WhatsAppPresenceController::class, 'destroy'])->name('whatsapp-presence.destroy');
     Route::delete('/whatsapp-presence/{id}/force', [\App\Http\Controllers\WhatsAppPresenceController::class, 'forceDelete'])->name('whatsapp-presence.force-delete');
     Route::post('/whatsapp-presence/{id}/check', [\App\Http\Controllers\WhatsAppPresenceController::class, 'checkNow'])->name('whatsapp-presence.check-now');
