@@ -93,9 +93,41 @@ const submit = () => {
         onSuccess: () => {
             form.reset();
             form.social_account_id = props.whatsappAccounts[0]?.id || '';
+            form.consent_method = 'manual_verbal';
             availableContacts.value = [];
             showContactPicker.value = false;
         },
+    });
+};
+
+// ===== Bulk selection (checkbox on consent list) =====
+const selectedIds = ref([]);
+const toggleSelect = (id) => {
+    if (selectedIds.value.includes(id)) {
+        selectedIds.value = selectedIds.value.filter(i => i !== id);
+    } else {
+        selectedIds.value.push(id);
+    }
+};
+const toggleSelectAll = () => {
+    const activeIds = props.consents.filter(c => c.is_active).map(c => c.id);
+    if (selectedIds.value.length === activeIds.length) {
+        selectedIds.value = [];
+    } else {
+        selectedIds.value = activeIds;
+    }
+};
+const bulkRevoke = () => {
+    if (selectedIds.value.length === 0) return;
+    if (!confirm(`Revoke ${selectedIds.value.length} consent(s)?`)) return;
+    useForm({ ids: selectedIds.value }).post('/whatsapp-presence/bulk-revoke', {
+        onSuccess: () => { selectedIds.value = []; }
+    });
+};
+const bulkCheck = () => {
+    if (selectedIds.value.length === 0) return;
+    useForm({ ids: selectedIds.value }).post('/whatsapp-presence/bulk-check', {
+        onSuccess: () => { selectedIds.value = []; }
     });
 };
 
@@ -314,10 +346,10 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
                                 class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500" />
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Consent Method</label>
-                            <select v-model="form.consent_method" required
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Consent Method (opsional)</label>
+                            <select v-model="form.consent_method"
                                 class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-green-500 focus:ring-green-500">
-                                <option value="manual_verbal">Verbal (lisan)</option>
+                                <option value="manual_verbal">Verbal (lisan) — default</option>
                                 <option value="written">Tertulis (chat/document)</option>
                                 <option value="qr_scan">QR scan (self-signup)</option>
                                 <option value="self_signup">Self signup form</option>
@@ -348,53 +380,62 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
 
         <!-- Consents list -->
         <div class="bg-white p-6 rounded-lg shadow">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Consented Contacts ({{ consents.length }})</h2>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">Consented Contacts ({{ consents.length }})</h2>
+                <!-- Bulk action toolbar -->
+                <div v-if="selectedIds.length > 0" class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500">{{ selectedIds.length }} selected</span>
+                    <button type="button" @click="bulkCheck"
+                        class="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 rounded hover:bg-green-100 border border-green-200">
+                        ✓ Check Now ({{ selectedIds.length }})
+                    </button>
+                    <button type="button" @click="bulkRevoke"
+                        class="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-50 rounded hover:bg-orange-100 border border-orange-200">
+                        Revoke ({{ selectedIds.length }})
+                    </button>
+                </div>
+            </div>
             <div v-if="consents.length === 0" class="text-center py-8 text-gray-500">
                 <p>Belum ada consent terdaftar.</p>
                 <p class="text-xs mt-1">Tambahkan kontak yang sudah explicit consent di form di atas.</p>
             </div>
-            <div v-else class="space-y-3">
+            <div v-else class="space-y-2">
+                <!-- Select all checkbox -->
+                <div v-if="consents.filter(c => c.is_active).length > 0" class="flex items-center gap-2 pb-2 border-b border-gray-100">
+                    <input type="checkbox" :checked="selectedIds.length === consents.filter(c => c.is_active).length"
+                        @change="toggleSelectAll"
+                        class="rounded border-gray-300 text-green-600 focus:ring-green-500" />
+                    <span class="text-xs text-gray-500">Select All Active</span>
+                </div>
                 <div v-for="c in consents" :key="c.id"
-                    class="border border-gray-200 rounded-lg p-3"
+                    class="border border-gray-200 rounded-lg p-3 flex items-start gap-2"
                     :class="{ 'opacity-50': !c.is_active }">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2">
-                                <p class="font-medium text-gray-900 truncate">{{ c.display_name || c.jid }}</p>
-                                <span v-if="c.is_active"
-                                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800">ACTIVE</span>
-                                <span v-else
-                                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-800">REVOKED</span>
-                            </div>
-                            <p class="text-xs text-gray-500 font-mono">{{ c.phone }} · {{ c.jid }}</p>
-                            <p class="text-xs text-gray-400 mt-0.5">
-                                Method: {{ c.consent_method }} · Given: {{ c.conent_given_at || c.consent_given_at }}
-                                <span v-if="c.consent_expires_at">· Expires: {{ c.consent_expires_at }}</span>
-                            </p>
-                            <p v-if="c.notes" class="text-xs text-gray-400 mt-0.5 italic">{{ c.notes }}</p>
-
-                            <!-- Sample stats -->
-                            <div v-if="stats[c.id]" class="mt-2 flex flex-wrap gap-3 text-xs">
-                                <span class="text-gray-600">Samples: <strong>{{ stats[c.id].sample_count }}</strong></span>
-                                <span class="text-green-600">Online: <strong>{{ stats[c.id].online_samples }}</strong></span>
-                                <span class="text-yellow-600">Recent: <strong>{{ stats[c.id].recent_samples }}</strong></span>
-                                <span v-if="stats[c.id].last_sample" class="text-gray-400">Last: {{ stats[c.id].last_sample }}</span>
-                            </div>
+                    <input v-if="c.is_active" type="checkbox" :checked="selectedIds.includes(c.id)"
+                        @change="toggleSelect(c.id)"
+                        class="mt-1 rounded border-gray-300 text-green-600 focus:ring-green-500 flex-shrink-0" />
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <p class="font-medium text-gray-900 truncate">{{ c.display_name || c.jid }}</p>
+                            <span v-if="c.is_active"
+                                class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 text-green-800">ACTIVE</span>
+                            <span v-else
+                                class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-800">REVOKED</span>
                         </div>
-                        <div class="flex flex-col gap-1 flex-shrink-0">
-                            <button v-if="c.is_active" type="button" @click="checkNow(c.id)"
-                                class="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 rounded hover:bg-green-100 border border-green-200">
-                                Check Now
-                            </button>
-                            <button v-if="c.is_active" type="button" @click="revoke(c.id)"
-                                class="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-50 rounded hover:bg-orange-100 border border-orange-200">
-                                Revoke
-                            </button>
-                            <button type="button" @click="forceDelete(c.id, c.display_name || c.jid)"
-                                class="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 rounded hover:bg-red-100 border border-red-200">
-                                Delete Data
-                            </button>
+                        <p class="text-xs text-gray-500 font-mono">{{ c.phone }} · {{ c.jid }}</p>
+                        <div v-if="stats[c.id]" class="mt-1 flex flex-wrap gap-3 text-xs">
+                            <span class="text-gray-600">Samples: <strong>{{ stats[c.id].sample_count }}</strong></span>
+                            <span class="text-green-600">Online: <strong>{{ stats[c.id].online_samples }}</strong></span>
+                            <span class="text-yellow-600">Recent: <strong>{{ stats[c.id].recent_samples }}</strong></span>
+                            <span v-if="stats[c.id].last_sample" class="text-gray-400">Last: {{ stats[c.id].last_sample }}</span>
                         </div>
+                    </div>
+                    <div class="flex gap-1 flex-shrink-0">
+                        <button v-if="c.is_active" type="button" @click="checkNow(c.id)"
+                            class="px-2 py-1 text-xs text-green-700 bg-green-50 rounded hover:bg-green-100 border border-green-200">Check</button>
+                        <button v-if="c.is_active" type="button" @click="revoke(c.id)"
+                            class="px-2 py-1 text-xs text-orange-700 bg-orange-50 rounded hover:bg-orange-100 border border-orange-200">Revoke</button>
+                        <button type="button" @click="forceDelete(c.id, c.display_name || c.jid)"
+                            class="px-2 py-1 text-xs text-red-700 bg-red-50 rounded hover:bg-red-100 border border-red-200">Delete</button>
                     </div>
                 </div>
             </div>

@@ -144,13 +144,16 @@ class CheckWhatsAppPresence implements ShouldQueue
                 }
             }
 
-            // Determine status based on how recent the last message is
+            // Determine status based on how recent the last message is.
+            // Thresholds match the sampling interval (30 min) — if we sample
+            // every 30 min, a contact whose last message was < 30 min ago was
+            // likely active when we checked.
             $status = 'offline';
             if ($lastSeenAt) {
                 $minutesAgo = $lastSeenAt->diffInMinutes(now());
-                if ($minutesAgo <= 5) {
+                if ($minutesAgo <= 30) {
                     $status = 'online';
-                } elseif ($minutesAgo <= 60) {
+                } elseif ($minutesAgo <= 120) {
                     $status = 'recent';
                 } else {
                     $status = 'offline';

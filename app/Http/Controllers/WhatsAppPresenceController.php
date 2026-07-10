@@ -61,7 +61,7 @@ class WhatsAppPresenceController extends Controller
             'jid' => 'required|string|max:100|ends_with:@s.whatsapp.net',
             'phone' => 'nullable|string|max:30',
             'display_name' => 'nullable|string|max:200',
-            'consent_method' => 'required|string|in:manual_verbal,written,qr_scan,self_signup',
+            'consent_method' => 'nullable|string|in:manual_verbal,written,qr_scan,self_signup',
             'consent_expires_at' => 'nullable|date|after:now',
             'notes' => 'nullable|string|max:1000',
         ]);
@@ -76,6 +76,9 @@ class WhatsAppPresenceController extends Controller
         // Extract phone from JID if not provided
         $phone = $validated['phone'] ?? str_replace('@s.whatsapp.net', '', $jid);
 
+        // Default consent_method to manual_verbal if not provided (optional field)
+        $consentMethod = $validated['consent_method'] ?? 'manual_verbal';
+
         $consent = WhatsAppPresenceConsent::updateOrCreate(
             [
                 'user_id' => $request->user()->id,
@@ -85,7 +88,7 @@ class WhatsAppPresenceController extends Controller
             [
                 'phone' => $phone,
                 'display_name' => $validated['display_name'] ?? null,
-                'consent_method' => $validated['consent_method'],
+                'consent_method' => $consentMethod,
                 'consent_given_at' => now(),
                 'is_active' => true,
                 'consent_expires_at' => $validated['consent_expires_at'] ?? null,
@@ -109,6 +112,50 @@ class WhatsAppPresenceController extends Controller
         $consent->update(['is_active' => false]);
 
         return back()->with('message', "Consent revoked for {$consent->display_name}. No further presence checks will run.");
+    }
+
+    /**
+     * Bulk revoke multiple consents at once.
+     * Body: { ids: [1, 2, 3] }
+     */
+    public function bulkRevoke(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'required|integer',
+        ]);
+
+        $count = WhatsAppPresenceConsent::where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->where('is_active', true)
+            ->update(['is_active' => false]);
+
+        return back()->with('message', "Revoked {$count} consent(s).");
+    }
+
+    /**
+     * Bulk check-now for multiple consents.
+     * Body: { ids: [1, 2, 3] }
+     */
+    public function bulkCheck(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'required|integer',
+        ]);
+
+        $consents = WhatsAppPresenceConsent::where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->where('is_active', true)
+            ->get();
+
+        $dispatched = 0;
+        foreach ($consents as $consent) {
+            CheckWhatsAppPresence::dispatch($consent->id)->delay(now()->addSeconds($dispatched * 3));
+            $dispatched++;
+        }
+
+        return back()->with('message', "Dispatched {$dispatched} presence check(s). Refresh in ~30s.");
     }
 
     /**
@@ -307,8 +354,15 @@ class WhatsAppPresenceController extends Controller
     /**
      * Build the 24-hour heatmap of contact activity.
      *
-     * For each hour 0-23, count samples grouped by last_seen_at hour.
-     * Only counts samples from the last 30 days (rolling window).
+     * For each hour 0-23, count UNIQUE contacts that were last seen
+     * in that hour. Deduplicates by (consent_id, DATE(last_seen_at),
+     * HOUR(last_seen_at)) so multiple samples pointing to the same
+     * last_seen_at timestamp only count ONCE.
+     *
+     * Without dedup: if we sample contact A at 9:30 and 10:00, and
+     * both times last_seen_at = 9:05, the heatmap would count 2 in
+     * the 9 AM slot — inflated/duplicate. With dedup: only 1 count
+     * per unique (contact, date, hour) pair.
      *
      * @return array  24 elements: [{ hour, online, recent, offline, total }]
      */
@@ -324,8 +378,9 @@ class WhatsAppPresenceController extends Controller
             ], range(0, 23));
         }
 
-        // Group samples by HOUR(last_seen_at). Only count samples that have a
-        // last_seen_at (status='online' or 'recent' or 'offline' with timestamp).
+        // Group by HOUR(last_seen_at) + status, but DEDUPLICATE by
+        // (consent_id, DATE(last_seen_at), HOUR(last_seen_at)) first
+        // using a subquery with DISTINCT.
         $rows = DB::table('whatsapp_presence_samples')
             ->select(
                 DB::raw('HOUR(last_seen_at) as hour'),
@@ -335,8 +390,18 @@ class WhatsAppPresenceController extends Controller
             ->whereIn('consent_id', $consentIds)
             ->whereNotNull('last_seen_at')
             ->where('last_seen_at', '>=', now()->subDays(30))
-            ->groupBy(DB::raw('HOUR(last_seen_at)'), 'status')
-            ->get();
+            // Dedup: only count one sample per (consent, date, hour-of-last-seen)
+            // This prevents multiple checks of the same contact in the same
+            // hour from inflating the heatmap.
+            ->groupBy(DB::raw('consent_id, DATE(last_seen_at), HOUR(last_seen_at), status'))
+            ->orderByRaw('HOUR(last_seen_at)')
+            // Re-aggregate the deduplicated rows
+            ->get()
+            // Now group by hour + status in PHP (since SQL GROUP BY above
+            // is for dedup, not final aggregation)
+            ->groupBy(function ($row) {
+                return $row->hour;
+            });
 
         $heatmap = [];
         for ($h = 0; $h < 24; $h++) {
@@ -348,7 +413,26 @@ class WhatsAppPresenceController extends Controller
                 'total' => 0,
             ];
         }
-        foreach ($rows as $r) {
+
+        // The groupBy above gives us rows per (consent, date, hour, status).
+        // We need to count unique contacts per hour (not total samples).
+        // So we re-query with proper dedup using a subquery.
+        $dedupedRows = DB::table(DB::raw('(
+            SELECT DISTINCT
+                consent_id,
+                DATE(last_seen_at) as seen_date,
+                HOUR(last_seen_at) as hour,
+                status
+            FROM whatsapp_presence_samples
+            WHERE consent_id IN (' . implode(',', $consentIds->toArray()) . ')
+            AND last_seen_at IS NOT NULL
+            AND last_seen_at >= NOW() - INTERVAL 30 DAY
+        ) as deduped'))
+            ->select('hour', 'status', DB::raw('COUNT(*) as count'))
+            ->groupBy('hour', 'status')
+            ->get();
+
+        foreach ($dedupedRows as $r) {
             $hour = (int) $r->hour;
             if ($hour >= 0 && $hour < 24) {
                 $heatmap[$hour][$r->status] = (int) $r->count;

@@ -93,6 +93,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/whatsapp-presence/{id}', [\App\Http\Controllers\WhatsAppPresenceController::class, 'destroy'])->name('whatsapp-presence.destroy');
     Route::delete('/whatsapp-presence/{id}/force', [\App\Http\Controllers\WhatsAppPresenceController::class, 'forceDelete'])->name('whatsapp-presence.force-delete');
     Route::post('/whatsapp-presence/{id}/check', [\App\Http\Controllers\WhatsAppPresenceController::class, 'checkNow'])->name('whatsapp-presence.check-now');
+    Route::post('/whatsapp-presence/bulk-revoke', [\App\Http\Controllers\WhatsAppPresenceController::class, 'bulkRevoke'])->name('whatsapp-presence.bulk-revoke');
+    Route::post('/whatsapp-presence/bulk-check', [\App\Http\Controllers\WhatsAppPresenceController::class, 'bulkCheck'])->name('whatsapp-presence.bulk-check');
     Route::get('/whatsapp-presence/heatmap', [\App\Http\Controllers\WhatsAppPresenceController::class, 'heatmap'])->name('whatsapp-presence.heatmap');
     Route::post('/whatsapp-presence/available-contacts', [\App\Http\Controllers\WhatsAppPresenceController::class, 'availableContacts'])->name('whatsapp-presence.available-contacts');
     Route::get('/whatsapp-presence/recommend', [\App\Http\Controllers\WhatsAppPresenceController::class, 'recommend'])->name('whatsapp-presence.recommend');
