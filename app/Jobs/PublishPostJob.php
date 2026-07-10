@@ -18,6 +18,13 @@ class PublishPostJob implements ShouldQueue
 
     public int $tries = 3;
     public int $backoff = 60;
+    /**
+     * Per-job timeout in seconds. Some publishers (notably WhatsApp Story
+     * via Evolution API, which uploads media to mmg.whatsapp.net) take
+     * well over the Laravel default 60s. Bumping to 5min so media-heavy
+     * publishes can complete without hitting TimeoutExceededException.
+     */
+    public int $timeout = 300;
 
     public function __construct(
         public int $postId,
