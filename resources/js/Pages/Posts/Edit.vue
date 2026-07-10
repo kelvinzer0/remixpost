@@ -265,6 +265,9 @@ const isPdfUrl = (url) => {
     const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
     return ext === 'pdf';
 };
+const isImageMime = (mime) => mime?.startsWith('image/');
+const isVideoMime = (mime) => mime?.startsWith('video/');
+const isPdfMime = (mime) => mime === 'application/pdf';
 
 const checkProvider = (provider) => {
     const req = getReq(provider);
@@ -373,7 +376,8 @@ const minDate = () => {
     return d.toISOString().slice(0, 16);
 };
 
-// Media picker (optional — Edit uses media_urls directly from post)
+// Media picker — let user add/remove media on edit (same UX as Create page)
+const showMediaPicker = ref(false);
 const removeMedia = (i) => form.media_urls.splice(i, 1);
 
 // ===== Tags =====
@@ -601,7 +605,7 @@ const supportsTags = computed(() => {
                                     class="text-xs text-gray-500 italic p-2 bg-green-50 rounded">
                                     📖 Story akan diposting ke status WhatsApp kamu. Wajib attach media (image/video).
                                     <span v-if="form.media_urls.length === 0" class="block mt-1 text-red-600 font-semibold not-italic">
-                                        ⚠️ Belum ada media di post ini — story WA tidak bisa dikirim tanpa media! Tambah media lewat halaman Create.
+                                        ⚠️ Belum ada media di post ini — story WA tidak bisa dikirim tanpa media! Tambah media lewat tombol + di bawah.
                                     </span>
                                 </div>
 
@@ -682,9 +686,14 @@ const supportsTags = computed(() => {
                     <p v-if="form.errors.account_ids" class="mt-1 text-sm text-red-600">{{ form.errors.account_ids }}</p>
                 </div>
 
-                <!-- Media preview (read-only; for edit we show what was attached) -->
-                <div v-if="form.media_urls.length > 0">
-                    <label class="block text-sm font-medium text-gray-700">Attached media</label>
+                <!-- Media selection (editable — same UX as Create page) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">
+                        Media
+                        <span v-if="selectedProviders.length > 0" class="ml-1 text-xs font-normal text-gray-500">
+                            ({{ selectedProviders.some(p => getReq(p).requires_media) ? 'required for selected accounts' : 'optional' }})
+                        </span>
+                    </label>
                     <div class="mt-2 flex flex-wrap gap-2">
                         <div v-for="(url, i) in form.media_urls" :key="i" class="relative group">
                             <img v-if="isImageUrl(url)" :src="url" class="w-20 h-20 object-cover rounded-md border border-gray-200" />
@@ -693,7 +702,7 @@ const supportsTags = computed(() => {
                                 <span class="text-[9px] text-white mt-0.5">VIDEO</span>
                             </div>
                             <div v-else-if="isPdfUrl(url)" class="w-20 h-20 flex flex-col items-center justify-center bg-rose-50 rounded-md border border-rose-200">
-                                <svg class="w-7 h-7 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                <svg class="w-7 h-7 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><text x="10" y="14" text-anchor="middle" fill="#fff" font-size="6" font-weight="bold">PDF</text></svg>
                                 <span class="text-[9px] text-rose-700 mt-0.5 font-semibold">PDF</span>
                             </div>
                             <div v-else class="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
@@ -706,8 +715,40 @@ const supportsTags = computed(() => {
                                 ×
                             </button>
                         </div>
+                        <button type="button" @click="showMediaPicker = !showMediaPicker"
+                            class="w-20 h-20 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center text-gray-400 hover:border-brand-400 hover:text-brand-600">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </button>
                     </div>
-                    <p class="mt-1 text-xs text-gray-500">To add new media, use the Create page. Here you can only remove attachments.</p>
+                    <div v-if="showMediaPicker" class="mt-2 p-4 border border-gray-200 rounded-md max-h-64 overflow-y-auto">
+                        <div class="grid grid-cols-4 gap-2">
+                            <button v-for="item in (props.media || [])" :key="item.id"
+                                type="button"
+                                @click="form.media_urls.push(item.url); showMediaPicker = false"
+                                class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
+                                <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
+                                <div v-else-if="isVideoMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-gray-900">
+                                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
+                                </div>
+                                <div v-else-if="isPdfMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-rose-50">
+                                    <svg class="w-5 h-5 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                    <span class="text-[8px] text-rose-700 mt-0.5 font-bold">PDF</span>
+                                </div>
+                                <div v-else class="w-full h-16 flex items-center justify-center bg-gray-100">
+                                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                </div>
+                                <p class="text-xs text-gray-500 truncate px-1">{{ item.original_name }}</p>
+                            </button>
+                        </div>
+                        <p v-if="!props.media || props.media.length === 0" class="text-xs text-gray-400 text-center py-4">
+                            No media uploaded. <Link href="/media" class="text-brand-600 underline">Upload some first</Link>.
+                        </p>
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Upload media in the <Link href="/media" class="text-brand-600">Media Manager</Link>, then select here. Klik × untuk hapus attachment.</p>
                 </div>
 
                 <!-- Tags -->
