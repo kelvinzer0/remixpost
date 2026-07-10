@@ -87,6 +87,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/ai/caption', [\App\Http\Controllers\AICaptionController::class, 'generate'])->name('ai.caption.generate');
     Route::get('/ai/tones', [\App\Http\Controllers\AICaptionController::class, 'tones'])->name('ai.tones');
 
+    // WhatsApp presence opt-in tracker
+    Route::get('/whatsapp-presence', [\App\Http\Controllers\WhatsAppPresenceController::class, 'index'])->name('whatsapp-presence.index');
+    Route::post('/whatsapp-presence', [\App\Http\Controllers\WhatsAppPresenceController::class, 'store'])->name('whatsapp-presence.store');
+    Route::delete('/whatsapp-presence/{id}', [\App\Http\Controllers\WhatsAppPresenceController::class, 'destroy'])->name('whatsapp-presence.destroy');
+    Route::delete('/whatsapp-presence/{id}/force', [\App\Http\Controllers\WhatsAppPresenceController::class, 'forceDelete'])->name('whatsapp-presence.force-delete');
+    Route::post('/whatsapp-presence/{id}/check', [\App\Http\Controllers\WhatsAppPresenceController::class, 'checkNow'])->name('whatsapp-presence.check-now');
+    Route::get('/whatsapp-presence/heatmap', [\App\Http\Controllers\WhatsAppPresenceController::class, 'heatmap'])->name('whatsapp-presence.heatmap');
+    Route::get('/whatsapp-presence/recommend', [\App\Http\Controllers\WhatsAppPresenceController::class, 'recommend'])->name('whatsapp-presence.recommend');
+
     // Buffer Pinterest boards fetcher (proxied GraphQL call)
     Route::post('/ai/buffer-pinterest-boards', [\App\Http\Controllers\SocialAccountController::class, 'fetchBufferPinterestBoards'])->name('social-accounts.buffer-pinterest-boards');
     // Fetch Pinterest boards for an already-connected Buffer account (for post-time board picker)

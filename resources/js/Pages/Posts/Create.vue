@@ -159,6 +159,50 @@ const aiTone = ref('casual');
 const aiCount = ref(3);
 const aiContextPreview = ref('');
 
+// ===== WhatsApp presence recommendations =====
+const waRecommendations = ref([]);
+const waRecommendLoading = ref(false);
+const waRecommendError = ref('');
+
+const fetchWARecommendations = async () => {
+    waRecommendLoading.value = true;
+    waRecommendError.value = '';
+    try {
+        const response = await fetch('/whatsapp-presence/recommend', {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        const data = await response.json();
+        if (data.recommendations) {
+            waRecommendations.value = data.recommendations;
+        } else if (data.reason) {
+            waRecommendError.value = data.reason;
+        }
+    } catch (e) {
+        waRecommendError.value = 'Gagal fetch rekomendasi presence.';
+    } finally {
+        waRecommendLoading.value = false;
+    }
+};
+
+const applyRecommendation = (hour) => {
+    // Set scheduled_at to next occurrence of that hour, +5 min buffer
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(hour, 5, 0, 0); // HH:05:00 to ensure future
+    if (target <= now) {
+        target.setDate(target.getDate() + 1); // tomorrow if hour already passed
+    }
+    // Format as datetime-local input value (YYYY-MM-DDTHH:MM)
+    const tzOffset = target.getTimezoneOffset() * 60000;
+    form.scheduled_at = new Date(target - tzOffset).toISOString().slice(0, 16);
+};
+
+// Fetch on mount (non-blocking)
+onMounted(() => {
+    fetchWARecommendations();
+});
+
 // ===== Auto-save (Draft) =====
 const autoSaveStatus = ref(''); // '', 'saving...', 'saved at HH:MM:SS', 'error'
 const autoSavePostId = ref(null); // once created, track post ID for updates
@@ -893,6 +937,29 @@ const minDate = () => {
                         placeholder="Opsional — mis. hashtag tambahan atau CTA"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm"></textarea>
                     <p class="mt-1 text-xs text-gray-500">Posting utama → tunggu 5 detik → komentar ini auto-post. Cocok untuk hashtag IG atau link di komentar FB.</p>
+                </div>
+
+                <!-- WhatsApp presence recommendations -->
+                <div v-if="waRecommendations.length > 0 || waRecommendLoading || waRecommendError"
+                    class="p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p class="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                        <span>🎯</span> Rekomendasi Jam Posting (WA Presence)
+                    </p>
+                    <div v-if="waRecommendLoading" class="text-xs text-gray-500">Loading rekomendasi...</div>
+                    <div v-else-if="waRecommendError" class="text-xs text-gray-500 italic">{{ waRecommendError }}</div>
+                    <div v-else class="flex flex-wrap gap-2">
+                        <button v-for="(rec, i) in waRecommendations" :key="rec.hour" type="button"
+                            @click="applyRecommendation(rec.hour)"
+                            class="inline-flex items-center gap-1 px-2 py-1 bg-white border border-green-300 rounded text-xs hover:bg-green-100">
+                            <span class="text-gray-400">#{{ i + 1 }}</span>
+                            <span class="font-semibold text-green-700">{{ String(rec.hour).padStart(2, '0') }}:00</span>
+                            <span class="text-gray-500">({{ rec.online_count }} on, {{ rec.recent_count }} recent)</span>
+                            <span class="text-gray-400">→ apply</span>
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-1">
+                        Berdasarkan jam aktif kontak yang sudah consent. <Link href="/whatsapp-presence" class="underline">Kelola consent</Link>.
+                    </p>
                 </div>
 
                 <!-- Schedule -->
