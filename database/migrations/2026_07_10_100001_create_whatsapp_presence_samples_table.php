@@ -14,6 +14,11 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
+        // Drop table if exists (idempotent — prevents "table already exists"
+        // error when MySQL has stale table from previous failed migration).
+        // This is safe because the table is empty if previous migration failed.
+        Schema::dropIfExists('whatsapp_presence_samples');
+
         Schema::create('whatsapp_presence_samples', function (Blueprint $table) {
             $table->id();
             $table->foreignId('consent_id')->constrained('whatsapp_presence_consents')->cascadeOnDelete();
