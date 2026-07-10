@@ -58,7 +58,8 @@ class WhatsAppPresenceController extends Controller
     {
         $validated = $request->validate([
             'social_account_id' => 'required|exists:social_accounts,id',
-            'phone' => 'required|string|max:30',
+            'jid' => 'required|string|max:100|ends_with:@s.whatsapp.net',
+            'phone' => 'nullable|string|max:30',
             'display_name' => 'nullable|string|max:200',
             'consent_method' => 'required|string|in:manual_verbal,written,qr_scan,self_signup',
             'consent_expires_at' => 'nullable|date|after:now',
@@ -71,7 +72,9 @@ class WhatsAppPresenceController extends Controller
             return back()->with('error', 'Invalid WhatsApp account.');
         }
 
-        $jid = WhatsAppPresenceConsent::phoneToJid($validated['phone']);
+        $jid = $validated['jid'];
+        // Extract phone from JID if not provided
+        $phone = $validated['phone'] ?? str_replace('@s.whatsapp.net', '', $jid);
 
         $consent = WhatsAppPresenceConsent::updateOrCreate(
             [
@@ -80,7 +83,7 @@ class WhatsAppPresenceController extends Controller
                 'jid' => $jid,
             ],
             [
-                'phone' => $validated['phone'],
+                'phone' => $phone,
                 'display_name' => $validated['display_name'] ?? null,
                 'consent_method' => $validated['consent_method'],
                 'consent_given_at' => now(),
@@ -140,6 +143,110 @@ class WhatsAppPresenceController extends Controller
     public function heatmap(Request $request)
     {
         return response()->json($this->buildHeatmap($request->user()->id));
+    }
+
+    /**
+     * Fetch available WhatsApp contacts from a connected Evolution API
+     * instance, EXCLUDING contacts that already have an active consent.
+     *
+     * Used by the Add Consent form to show a pickable list of contacts
+     * (with profile pictures + pushName) instead of asking the user to
+     * type a phone number manually.
+     *
+     * POST /whatsapp-presence/available-contacts
+     * Body: { social_account_id: int }
+     * Returns: { contacts: [{ jid, phone, name, picture, last_active_at }] }
+     */
+    public function availableContacts(Request $request)
+    {
+        $validated = $request->validate([
+            'social_account_id' => 'required|exists:social_accounts,id',
+        ]);
+
+        $account = SocialAccount::findOrFail($validated['social_account_id']);
+        if ($account->user_id !== $request->user()->id || $account->provider !== 'whatsapp') {
+            return response()->json(['error' => 'Invalid WhatsApp account.'], 400);
+        }
+
+        $metadata = is_string($account->metadata) ? json_decode($account->metadata, true) : ($account->metadata ?? []);
+        $evoUrl = rtrim($metadata['evo_url'] ?? '', '/');
+        $instance = $metadata['instance'] ?? '';
+        $apiKey = $account->access_token;
+
+        if (!$evoUrl || !$instance || !$apiKey) {
+            return response()->json(['error' => 'WhatsApp Evolution API config missing. Re-connect the account.'], 400);
+        }
+
+        // Fetch all chats (POST /chat/findChats — Evolution API v2.3+)
+        try {
+            $response = \Illuminate\Support\Facades\Http::withHeaders([
+                'apikey' => $apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout(30)->post("{$evoUrl}/chat/findChats/{$instance}", []);
+
+            if (!$response->ok()) {
+                return response()->json([
+                    'error' => "Evolution API error (HTTP {$response->status()}): " . substr($response->body(), 0, 200),
+                ], 502);
+            }
+
+            $data = $response->json();
+            $chats = is_array($data) && isset($data[0]) ? $data : ($data['chats'] ?? []);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to fetch contacts: ' . $e->getMessage()], 500);
+        }
+
+        // Get JIDs that already have a consent row for this account
+        // (any state — active or revoked — so user doesn't re-add revoked ones
+        // unless they explicitly force-delete first).
+        $existingJids = WhatsAppPresenceConsent::where('social_account_id', $account->id)
+            ->pluck('jid')
+            ->toArray();
+
+        // Build contact list — only 1:1 chats not already consented
+        $contacts = [];
+        foreach ($chats as $c) {
+            $jid = $c['remoteJid'] ?? null;
+            if (!$jid || !str_ends_with($jid, '@s.whatsapp.net')) continue;
+            if ($jid === '0@s.whatsapp.net') continue; // skip WhatsApp system
+            if (in_array($jid, $existingJids)) continue; // skip already consented
+
+            $name = $c['pushName'] ?? null;
+            // Skip contacts without a name — they're usually unknown numbers
+            // that the user has never chatted with meaningfully.
+            if (!$name) continue;
+
+            // Format last active time
+            $lastActive = null;
+            $lastMsg = $c['lastMessage'] ?? null;
+            if ($lastMsg) {
+                $ts = $lastMsg['messageTimestamp'] ?? ($lastMsg['timestamp'] ?? null);
+                if ($ts) {
+                    try {
+                        $lastActive = \Carbon\Carbon::createFromTimestamp((int) $ts)->toIso8601String();
+                    } catch (\Exception $e) {
+                        // leave null
+                    }
+                }
+            }
+
+            $contacts[] = [
+                'jid' => $jid,
+                'phone' => str_replace('@s.whatsapp.net', '', $jid),
+                'name' => $name,
+                'picture' => $c['profilePicUrl'] ?? null,
+                'last_active_at' => $lastActive,
+            ];
+        }
+
+        // Sort by name alphabetically for easy scanning
+        usort($contacts, fn($a, $b) => strcmp($a['name'], $b['name']));
+
+        return response()->json([
+            'contacts' => $contacts,
+            'total' => count($contacts),
+            'excluded_already_consent' => count($existingJids),
+        ]);
     }
 
     /**
