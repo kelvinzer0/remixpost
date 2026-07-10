@@ -38,8 +38,10 @@ return new class extends Migration {
             //   WHERE social_account_id = ? AND status = 'online'
             //   AND sampled_at > NOW() - INTERVAL 30 DAY
             //   GROUP BY h
-            $table->index(['social_account_id', 'status', 'sampled_at']);
-            $table->index(['consent_id', 'sampled_at']);
+            // Explicit short index names because MySQL has 64-char limit on
+            // identifier names — Laravel's auto-generated names exceed that.
+            $table->index(['social_account_id', 'status', 'sampled_at'], 'wa_ps_acc_status_sampled_idx');
+            $table->index(['consent_id', 'sampled_at'], 'wa_ps_consent_sampled_idx');
         });
     }
 

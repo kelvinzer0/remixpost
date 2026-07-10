@@ -50,7 +50,7 @@ return new class extends Migration {
             // partial-index pattern (just use composite unique, conflicts
             // handled by updateOrCreate).
             $table->unique(['user_id', 'social_account_id', 'jid'], 'uniq_wa_presence_consent');
-            $table->index(['social_account_id', 'is_active']);
+            $table->index(['social_account_id', 'is_active'], 'wa_pc_acc_active_idx');
         });
     }
 
