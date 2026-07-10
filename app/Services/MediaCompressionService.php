@@ -280,17 +280,24 @@ class MediaCompressionService
         $crfValues = [self::VIDEO_CRF, 30, 32, 35, 40];
         $success = false;
 
-        // Scale filter that PRESERVES ASPECT RATIO:
-        // - For landscape (iw > ih): scale width to min(1080, iw), height auto (-2)
-        // - For portrait (iw <= ih): scale height to min(1080, ih), width auto (-2)
-        // - The -2 ensures even dimensions (required by libx264) AND auto-calculates
-        //   the other dimension to maintain aspect ratio.
+        // Scale filter that PRESERVES ASPECT RATIO using simple syntax:
+        //   scale=-2:1080
         //
-        // Previous broken filter was: scale='if(gt(iw,ih),-2,iw)':'min(1080,ih)'
-        // which for a 1080x1920 portrait video produced 1080x1080 (SQUASHED to 1:1).
-        // The fix swaps the branches so portrait videos scale height→1080 with
-        // width auto-calculated, preserving 9:16 → 607x1080.
-        $scaleFilter = "scale='if(gt(iw,ih),min(" . self::VIDEO_MAX_HEIGHT . ",iw),-2)':'if(gt(iw,ih),-2,min(" . self::VIDEO_MAX_HEIGHT . ",ih))'";
+        // -2 = auto-calculate that dimension (maintains aspect ratio, ensures
+        //      even number required by libx264)
+        // 1080 = cap the HEIGHT at 1080
+        //
+        // This handles ALL orientations correctly:
+        //   Portrait 1080x1920 → 608x1080  (9:16 preserved)
+        //   Landscape 1920x1080 → 1920x1080 (no change, already 1080 tall)
+        //   Landscape 3840x2160 → 1920x1080 (downscaled, 16:9 preserved)
+        //   Square  1080x1080  → 1080x1080 (no change)
+        //
+        // Previous attempts used complex if(gt(iw,ih),...) expressions with
+        // escaped single quotes that ffmpeg couldn't parse ("No such filter:
+        // 'ih)'"), causing compression to silently fail — the video would
+        // pass through uncompressed or get squashed to 1:1.
+        $scaleFilter = "scale=-2:" . self::VIDEO_MAX_HEIGHT;
 
         foreach ($crfValues as $crf) {
             $cmd = sprintf(
