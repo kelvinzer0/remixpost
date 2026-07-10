@@ -186,16 +186,19 @@ const formatHour = (h) => {
     return `${String(h).padStart(2, '0')}:00`;
 };
 
-// Top 3 recommended hours
+// Top 3 recommended hours — only hours with actual online/recent data
 const top3Hours = computed(() => {
     return [...props.heatmap]
         .map(h => ({ ...h, score: h.online * 1.0 + h.recent * 0.5 }))
+        .filter(h => h.score > 0)  // exclude hours with zero activity
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
 });
 
 const totalSamples = computed(() => props.heatmap.reduce((sum, h) => sum + h.total, 0));
 const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.online, 0));
+const totalRecent = computed(() => props.heatmap.reduce((sum, h) => sum + h.recent, 0));
+const hasActivity = computed(() => totalOnline.value > 0 || totalRecent.value > 0);
 </script>
 
 <template>
@@ -264,7 +267,7 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
             </div>
 
             <!-- Top 3 recommended hours -->
-            <div v-if="totalSamples > 0" class="mt-4 p-3 bg-green-50 border border-green-200 rounded">
+            <div v-if="hasActivity && top3Hours.length > 0" class="mt-4 p-3 bg-green-50 border border-green-200 rounded">
                 <p class="text-sm font-semibold text-green-800 mb-2">🎯 Jam Terbaik untuk Posting (berdasarkan presence data):</p>
                 <div class="flex flex-wrap gap-2">
                     <span v-for="(h, i) in top3Hours" :key="h.hour"
@@ -276,7 +279,7 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
                 </div>
             </div>
             <div v-else class="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-500 italic">
-                Belum ada data. Tambahkan consent kontak + tunggu beberapa jam untuk sample terkumpul.
+                Belum ada data aktivitas (online/recent). Tambahkan consent kontak + tunggu kontak aktif mengirim pesan untuk sample terkumpul. Heatmap butuh 1-2 hari sampling untuk mulai show pattern.
             </div>
         </div>
 

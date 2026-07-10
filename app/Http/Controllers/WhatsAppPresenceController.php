@@ -371,14 +371,16 @@ class WhatsAppPresenceController extends Controller
         if ($totalOnline === 0 && $totalRecent === 0) {
             return response()->json([
                 'recommendations' => [],
-                'reason' => 'Belum ada data presence. Tambahkan consent kontak dan tunggu beberapa jam untuk sample terkumpul.',
+                'reason' => 'Belum ada data aktivitas (online/recent). Tambahkan consent kontak dan tunggu kontak aktif mengirim pesan.',
             ]);
         }
 
         // Score each hour: weight online=1.0, recent=0.5
+        // FILTER OUT hours with score=0 — don't recommend hours with no activity
         $scored = [];
         foreach ($heatmap as $h) {
             $score = $h['online'] * 1.0 + $h['recent'] * 0.5;
+            if ($score <= 0) continue; // skip hours with zero activity
             $scored[] = [
                 'hour' => $h['hour'],
                 'score' => $score,
@@ -386,6 +388,13 @@ class WhatsAppPresenceController extends Controller
                 'recent_count' => $h['recent'],
                 'total' => $h['total'],
             ];
+        }
+
+        if (empty($scored)) {
+            return response()->json([
+                'recommendations' => [],
+                'reason' => 'Ada sample data tapi belum ada aktivitas online/recent. Tunggu kontak aktif mengirim pesan.',
+            ]);
         }
 
         // Sort by score desc, take top 3
