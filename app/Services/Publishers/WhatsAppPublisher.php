@@ -52,6 +52,14 @@ class WhatsAppPublisher implements PublisherInterface
                 $content = rtrim($content) . "\n\n" . $tagStr;
             }
 
+            // Rewrite media URLs to use internal docker network hostname
+            // when possible. Evolution API lives in the same docker network
+            // as remixpost, so fetching media via the internal hostname
+            // (http://remixpost-docker-compose-app-1/storage/...) is faster
+            // and bypasses Cloudflare WAF/bot-detection that intermittently
+            // blocks large video downloads from the public URL.
+            $mediaUrls = array_map([$this, 'rewriteMediaUrl'], $mediaUrls);
+
             // Read Evolution API config from metadata
             $metadata = is_string($account['metadata'] ?? null)
                 ? json_decode($account['metadata'], true) ?? []
@@ -460,6 +468,52 @@ class WhatsAppPublisher implements PublisherInterface
                 'error' => "Evolution API error {$resp->getStatusCode()} ({$label}): {$body}",
             ]];
         }
+    }
+
+    /**
+     * Rewrite a public media URL to use the internal docker network hostname.
+     *
+     * Why: Evolution API (running in the same docker network as remixpost)
+     * fetches media from the URL we give it. When the URL points to our own
+     * public domain (e.g. https://automate.warunglakku.com/storage/...),
+     * the request goes: evo container → public DNS → Cloudflare → VPS →
+     * back to remixpost container. This round-trip is slow + flaky —
+     * Cloudflare intermittently blocks large files (notably videos) with
+     * 'TypeError: fetch failed' even though the URL is publicly accessible.
+     *
+     * By rewriting the URL to use the internal hostname
+     * (http://remixpost-docker-compose-app-1/storage/...), the evo container
+     * can fetch media directly via the docker network — no Cloudflare, no
+     * public DNS, no SSL handshake. Much faster + 100% reliable.
+     *
+     * Only rewrites URLs that point to OUR OWN domain (configurable via
+     * APP_URL env). External URLs (e.g. user-supplied Buffer media URLs)
+     * are returned unchanged.
+     */
+    private function rewriteMediaUrl(string $url): string
+    {
+        $appUrl = config('app.url');
+        if (!$appUrl) return $url;
+
+        // Parse our public APP_URL to extract host + path prefix
+        $appParsed = parse_url($appUrl);
+        $appHost = $appParsed['host'] ?? null;
+        $appScheme = $appParsed['scheme'] ?? 'https';
+        if (!$appHost) return $url;
+
+        // Parse the media URL
+        $urlParsed = parse_url($url);
+        $urlHost = $urlParsed['host'] ?? null;
+        $urlPath = $urlParsed['path'] ?? '';
+        $urlQuery = isset($urlParsed['query']) ? '?' . $urlParsed['query'] : '';
+
+        // Only rewrite if the URL host matches our APP_URL host
+        if ($urlHost !== $appHost) return $url;
+
+        // Build internal URL using docker hostname
+        // Override-able via env WA_INTERNAL_MEDIA_HOST for custom deployments
+        $internalHost = env('WA_INTERNAL_MEDIA_HOST', 'remixpost-docker-compose-app-1');
+        return "http://{$internalHost}{$urlPath}{$urlQuery}";
     }
 
     /**

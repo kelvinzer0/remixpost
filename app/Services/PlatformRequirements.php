@@ -234,7 +234,13 @@ class PlatformRequirements
                 'supports_tags' => true,
                 'supports_first_comment' => false,
                 'max_content_length' => 65536,
-                'max_media_size_mb' => 64,
+                // WhatsApp's actual media limit is 64MB for documents, but for
+                // videos + images sent via the standard API the effective limit
+                // is ~16MB before WhatsApp servers reject with 'Media upload
+                // failed on all hosts'. Set to 14MB to trigger our compression
+                // service which lowers bitrate + re-encodes — much higher
+                // success rate for video story / DM.
+                'max_media_size_mb' => 14,
                 'max_media_count' => 1,
                 'notes' => 'Via Evolution API (Baileys). Pilih target saat buat post: User / Group / Channel / Story. Story butuh media.',
             ],
