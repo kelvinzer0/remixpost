@@ -63,11 +63,12 @@ class InstagramPublisher implements PublisherInterface
 
             // Single media (image or video)
             if (count($mediaUrls) === 1) {
-                return $this->publishSingleMedia($igUserId, $caption, $mediaUrls[0], $accessToken);
+                return $this->publishSingleMedia($igUserId, $caption, $mediaUrls[0], $accessToken, $firstComment);
             }
 
-            // Carousel (multiple images/videos)
-            return $this->publishCarousel($igUserId, $caption, $mediaUrls, $accessToken);
+            // Carousel (multiple images/videos) — up to 10 items
+            $carouselUrls = array_slice($mediaUrls, 0, 10);
+            return $this->publishCarousel($igUserId, $caption, $carouselUrls, $accessToken, $firstComment);
         } catch (Exception $e) {
             return [
                 'success' => false,
@@ -76,7 +77,7 @@ class InstagramPublisher implements PublisherInterface
         }
     }
 
-    private function publishSingleMedia(string $igUserId, string $caption, string $mediaUrl, string $accessToken): array
+    private function publishSingleMedia(string $igUserId, string $caption, string $mediaUrl, string $accessToken, ?string $firstComment = null): array
     {
         // Detect media type from URL extension
         $mediaType = $this->detectMediaType($mediaUrl);
@@ -108,10 +109,10 @@ class InstagramPublisher implements PublisherInterface
         $containerId = $createBody['id'];
 
         // Step 2: Publish the container
-        return $this->publishContainer($igUserId, $containerId, $accessToken);
+        return $this->publishContainer($igUserId, $containerId, $accessToken, $firstComment);
     }
 
-    private function publishCarousel(string $igUserId, string $caption, array $mediaUrls, string $accessToken): array
+    private function publishCarousel(string $igUserId, string $caption, array $mediaUrls, string $accessToken, ?string $firstComment = null): array
     {
         // Step 1: Create child media containers
         $childrenIds = [];
@@ -164,10 +165,10 @@ class InstagramPublisher implements PublisherInterface
         }
 
         // Step 3: Publish carousel
-        return $this->publishContainer($igUserId, $carouselBody['id'], $accessToken);
+        return $this->publishContainer($igUserId, $carouselBody['id'], $accessToken, $firstComment);
     }
 
-    private function publishContainer(string $igUserId, string $containerId, string $accessToken): array
+    private function publishContainer(string $igUserId, string $containerId, string $accessToken, ?string $firstComment = null): array
     {
         $publishResponse = $this->httpClient->post(
             "https://graph.facebook.com/{$this->apiVersion}/{$igUserId}/media_publish",

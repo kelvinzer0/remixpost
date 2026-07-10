@@ -126,9 +126,16 @@ class WhatsAppPublisher implements PublisherInterface
             // For user/group/channel — determine if text-only or with media
             if (empty($mediaUrls)) {
                 return $this->sendText($evoUrl, $instance, $headers, $target, $targetType, $content);
-            } else {
-                return $this->sendMedia($evoUrl, $instance, $headers, $target, $targetType, $content, $mediaUrls);
             }
+
+            // Multiple media: send sequentially (WhatsApp API only supports 1 media per request).
+            // First media gets the full caption, subsequent media get numbering only.
+            if (count($mediaUrls) > 1) {
+                return $this->sendMediaSequential($evoUrl, $instance, $headers, $target, $targetType, $content, $mediaUrls);
+            }
+
+            // Single media
+            return $this->sendMedia($evoUrl, $instance, $headers, $target, $targetType, $content, $mediaUrls);
         } catch (\GuzzleHttp\Exception\ClientException $e) {
             $resp = $e->getResponse();
             $body = $resp ? $resp->getBody()->getContents() : '';
@@ -181,6 +188,65 @@ class WhatsAppPublisher implements PublisherInterface
         return [
             'success' => true,
             'external_id' => $messageId,
+        ];
+    }
+
+    /**
+     * Send multiple media sequentially (WhatsApp API only supports 1 media per request).
+     *
+     * Strategy:
+     *   - First media: full user caption
+     *   - Subsequent media: caption "({n}/{total})" so recipient knows it's a sequence
+     *   - 2 second delay between sends to avoid rate-limiting
+     *   - If any send fails, stop and return the error (don't continue sending)
+     *
+     * @return array  ['success' => true, 'external_id' => 'first_msg_id', 'info' => 'Sent N media messages']
+     */
+    private function sendMediaSequential(string $evoUrl, string $instance, array $headers, string $target, string $targetType, string $caption, array $mediaUrls): array
+    {
+        $total = count($mediaUrls);
+        $firstMessageId = null;
+        $sentCount = 0;
+
+        foreach ($mediaUrls as $i => $mediaUrl) {
+            $partNum = $i + 1;
+
+            // First media gets full caption; rest get numbering only
+            if ($i === 0) {
+                $mediaCaption = $caption;
+            } else {
+                $mediaCaption = "({$partNum}/{$total})";
+            }
+
+            $result = $this->sendMedia($evoUrl, $instance, $headers, $target, $targetType, $mediaCaption, [$mediaUrl]);
+
+            if (!$result['success']) {
+                // If some succeeded, report partial success
+                if ($sentCount > 0) {
+                    return [
+                        'success' => true,
+                        'external_id' => $firstMessageId,
+                        'warning' => "Only sent {$sentCount}/{$total} media. Failed at #{$partNum}: " . ($result['error'] ?? 'Unknown'),
+                    ];
+                }
+                return $result;
+            }
+
+            if ($i === 0) {
+                $firstMessageId = $result['external_id'] ?? null;
+            }
+            $sentCount++;
+
+            // Delay between sends (except after last one) to avoid rate-limiting
+            if ($i < $total - 1) {
+                sleep(2);
+            }
+        }
+
+        return [
+            'success' => true,
+            'external_id' => $firstMessageId,
+            'info' => "Sent {$total} media messages sequentially",
         ];
     }
 

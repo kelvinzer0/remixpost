@@ -241,8 +241,8 @@ class PlatformRequirements
                 // service which lowers bitrate + re-encodes — much higher
                 // success rate for video story / DM.
                 'max_media_size_mb' => 14,
-                'max_media_count' => 1,
-                'notes' => 'Via Evolution API (Baileys). Pilih target saat buat post: User / Group / Channel / Story. Story butuh media.',
+                'max_media_count' => 10, // multi-post sequential (1 media per WA API call, 2s delay)
+                'notes' => 'Via Evolution API (Baileys). Pilih target: User / Group / Channel / Story. Multi-media: dikirim berurutan (1 media per pesan, 2s delay). Story butuh media.',
             ],
         ];
     }
