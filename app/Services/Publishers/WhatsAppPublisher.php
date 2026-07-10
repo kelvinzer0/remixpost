@@ -108,13 +108,9 @@ class WhatsAppPublisher implements PublisherInterface
 
             // Build request based on target type
             if ($targetType === 'story') {
-                // Story/status — only media supported
-                if (empty($mediaUrls)) {
-                    return [
-                        'success' => false,
-                        'error' => 'WhatsApp story requires at least one image or video.',
-                    ];
-                }
+                // Story/status — media supported (image/video). Text-only story
+                // also works (uses caption as text content). Either way, post to
+                // status@broadcast via allContacts=true.
                 return $this->sendStory($evoUrl, $instance, $headers, $content, $mediaUrls);
             }
 
@@ -220,32 +216,75 @@ class WhatsAppPublisher implements PublisherInterface
     }
 
     /**
-     * Send story/status (only media supported).
+     * Send story/status.
+     *
+     * Evolution API v2 endpoint: POST /message/sendStatus/{instance}
+     * (NOT /message/sendStatusMessage/{instance} — that route doesn't exist)
+     *
+     * Body schema (camelCase, NOT PascalCase — `StatusJidList` fails with
+     * "StatusJidList is required" because the validator only recognizes
+     * `statusJidList`):
+     *   - type: 'text' | 'image' | 'video' | 'audio' | 'document'
+     *   - content: text content (for text) OR media URL (for media)
+     *   - caption: optional caption for media
+     *   - statusJidList: array of JIDs (required if allContacts is not true)
+     *   - allContacts: bool (true = broadcast to all contacts)
+     *   - For text type ONLY: backgroundColor (hex), fontColor (hex), font (int 1+)
+     *
+     * We default to `allContacts: true` for story broadcasts — that's the
+     * typical use case (post to all my contacts' story feed).
      */
     private function sendStory(string $evoUrl, string $instance, array $headers, string $caption, array $mediaUrls): array
     {
-        $mediaUrl = $mediaUrls[0];
-        $mediaType = MediaType::fromUrl($mediaUrl);
+        if (!empty($mediaUrls)) {
+            // Media story (image/video)
+            $mediaUrl = $mediaUrls[0];
+            $mediaType = MediaType::fromUrl($mediaUrl);
 
-        $evoMediaType = match ($mediaType) {
-            'image' => 'image',
-            'video' => 'video',
-            default => 'image',
-        };
+            $evoMediaType = match ($mediaType) {
+                'image' => 'image',
+                'video' => 'video',
+                default => 'image', // fallback for unknown types
+            };
 
-        $payload = [
-            'type' => $evoMediaType,
-            'content' => $mediaUrl,
-            'caption' => $caption,
-        ];
+            $payload = [
+                'type' => $evoMediaType,
+                'content' => $mediaUrl,
+                'caption' => $caption,
+                'allContacts' => true,
+            ];
+        } else {
+            // Text-only story (requires backgroundColor, fontColor, font)
+            $payload = [
+                'type' => 'text',
+                'content' => mb_substr($caption, 0, 500), // text content
+                'allContacts' => true,
+                'backgroundColor' => '#008069', // WhatsApp green
+                'fontColor' => '#FFFFFF',
+                'font' => 1, // 1=Arial (font index, must be ≥1 — 0 fails @IsNotEmpty)
+            ];
+        }
 
-        $response = $this->httpClient->post("{$evoUrl}/message/sendStatusMessage/{$instance}", [
-            'headers' => $headers,
-            'json' => $payload,
-        ]);
+        try {
+            $response = $this->httpClient->post("{$evoUrl}/message/sendStatus/{$instance}", [
+                'headers' => $headers,
+                'json' => $payload,
+                'timeout' => 60, // story sends can take a while (image upload)
+            ]);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            // Guzzle throws on non-2xx. Capture the response body if present.
+            $resp = $e->getResponse();
+            $body = $resp ? $resp->getBody()->getContents() : '';
+            return [
+                'success' => false,
+                'error' => 'Evolution API sendStatus failed: ' . $e->getMessage() . " | body: {$body}",
+            ];
+        }
 
         $body = json_decode($response->getBody()->getContents(), true);
-        $messageId = $body['key']['id'] ?? ($body['messageId'] ?? null);
+
+        // Success response shape: {"key":{"id":"...","remoteJid":"status@broadcast",...},"status":"PENDING",...}
+        $messageId = $body['key']['id'] ?? null;
 
         if (!$messageId) {
             return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $body];
@@ -254,6 +293,7 @@ class WhatsAppPublisher implements PublisherInterface
         return [
             'success' => true,
             'external_id' => $messageId,
+            'info' => 'Story broadcast to all contacts',
         ];
     }
 
