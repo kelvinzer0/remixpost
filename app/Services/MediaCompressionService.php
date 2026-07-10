@@ -280,14 +280,26 @@ class MediaCompressionService
         $crfValues = [self::VIDEO_CRF, 30, 32, 35, 40];
         $success = false;
 
+        // Scale filter that PRESERVES ASPECT RATIO:
+        // - For landscape (iw > ih): scale width to min(1080, iw), height auto (-2)
+        // - For portrait (iw <= ih): scale height to min(1080, ih), width auto (-2)
+        // - The -2 ensures even dimensions (required by libx264) AND auto-calculates
+        //   the other dimension to maintain aspect ratio.
+        //
+        // Previous broken filter was: scale='if(gt(iw,ih),-2,iw)':'min(1080,ih)'
+        // which for a 1080x1920 portrait video produced 1080x1080 (SQUASHED to 1:1).
+        // The fix swaps the branches so portrait videos scale height→1080 with
+        // width auto-calculated, preserving 9:16 → 607x1080.
+        $scaleFilter = "scale='if(gt(iw,ih),min(" . self::VIDEO_MAX_HEIGHT . ",iw),-2)':'if(gt(iw,ih),-2,min(" . self::VIDEO_MAX_HEIGHT . ",ih))'";
+
         foreach ($crfValues as $crf) {
             $cmd = sprintf(
-                '%s -i %s -c:v libx264 -crf %d -preset %s -vf "scale=\'if(gt(iw,ih),-2,iw)\':\'min(%d,ih)\'" -c:a aac -b:a 128k -movflags +faststart -y %s 2>&1',
+                '%s -i %s -c:v libx264 -crf %d -preset %s -vf "%s" -c:a aac -b:a 128k -movflags +faststart -y %s 2>&1',
                 escapeshellarg($ffmpeg),
                 escapeshellarg($localPath),
                 $crf,
                 self::VIDEO_PRESET,
-                self::VIDEO_MAX_HEIGHT,
+                $scaleFilter,
                 escapeshellarg($outputPath)
             );
 
@@ -313,11 +325,11 @@ class MediaCompressionService
             // Last attempt — use highest CRF result even if still over limit
             // Re-encode with CRF 40 (last value)
             $cmd = sprintf(
-                '%s -i %s -c:v libx264 -crf 40 -preset %s -vf "scale=\'if(gt(iw,ih),-2,iw)\':\'min(%d,ih)\'" -c:a aac -b:a 96k -movflags +faststart -y %s 2>&1',
+                '%s -i %s -c:v libx264 -crf 40 -preset %s -vf "%s" -c:a aac -b:a 96k -movflags +faststart -y %s 2>&1',
                 escapeshellarg($ffmpeg),
                 escapeshellarg($localPath),
                 self::VIDEO_PRESET,
-                self::VIDEO_MAX_HEIGHT,
+                $scaleFilter,
                 escapeshellarg($outputPath)
             );
             shell_exec($cmd);
