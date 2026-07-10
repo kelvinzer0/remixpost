@@ -52,13 +52,14 @@ class WhatsAppPublisher implements PublisherInterface
                 $content = rtrim($content) . "\n\n" . $tagStr;
             }
 
-            // Rewrite media URLs to use internal docker network hostname
-            // when possible. Evolution API lives in the same docker network
-            // as remixpost, so fetching media via the internal hostname
-            // (http://remixpost-docker-compose-app-1/storage/...) is faster
-            // and bypasses Cloudflare WAF/bot-detection that intermittently
-            // blocks large video downloads from the public URL.
-            $mediaUrls = array_map([$this, 'rewriteMediaUrl'], $mediaUrls);
+            // Don't rewrite media URLs to internal docker hostname.
+            // Originally added to bypass Cloudflare flakiness for large files,
+            // but it caused issues when the storage volume was not properly
+            // mounted in the container (file exists on public URL via nginx
+            // host path, but not in container's /app/storage volume).
+            // Instead: rely on the compression service (max_media_size_mb=14)
+            // to keep files small enough for Cloudflare to handle reliably.
+            // $mediaUrls = array_map([$this, 'rewriteMediaUrl'], $mediaUrls);
 
             // Read Evolution API config from metadata
             $metadata = is_string($account['metadata'] ?? null)
