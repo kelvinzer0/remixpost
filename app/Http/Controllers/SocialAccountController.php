@@ -2121,9 +2121,11 @@ class SocialAccountController extends Controller
                 }
             } else {
                 // target_type === 'user' — fetch recent 1:1 chats
-                // GET /chat/fetchChats/{instance}
+                // POST /chat/findChats/{instance} (Evolution API v2.3+ uses POST
+                // for find endpoints; older GET /chat/fetchChats/{instance}
+                // returns 404 on v2.3+).
                 $resp = Http::withHeaders($headers)
-                    ->get("{$evoUrl}/chat/fetchChats/{$instance}");
+                    ->post("{$evoUrl}/chat/findChats/{$instance}", []);
 
                 if (!$resp->ok()) {
                     return response()->json([
@@ -2132,29 +2134,41 @@ class SocialAccountController extends Controller
                 }
 
                 $data = $resp->json();
-                $chats = $data['chats'] ?? (is_array($data) ? $data : []);
+                // Response shape: array of chat objects (top-level array, NOT
+                // nested under 'chats').
+                $chats = is_array($data) && isset($data[0]) ? $data : ($data['chats'] ?? []);
 
                 foreach ($chats as $c) {
-                    $id = $c['id'] ?? null;
-                    if (!$id) continue;
-                    // Only 1:1 chats (skip groups/channels)
-                    if (!str_ends_with($id, '@s.whatsapp.net')) continue;
+                    // Chat objects use `remoteJid` for the JID (NOT `id` — that's
+                    // the database row ID, often null).
+                    $jid = $c['remoteJid'] ?? null;
+                    if (!$jid) continue;
+                    // Only 1:1 chats (skip groups/channels/broadcast/lid)
+                    if (!str_ends_with($jid, '@s.whatsapp.net')) continue;
+                    // Skip WhatsApp system contact "0@s.whatsapp.net"
+                    if ($jid === '0@s.whatsapp.net') continue;
 
-                    $name = $c['name'] ?? $c['pushName'] ?? $c['formattedName'] ?? null;
+                    $name = $c['pushName'] ?? $c['name'] ?? $c['formattedName'] ?? null;
                     if (!$name) continue; // skip chats without a name
 
                     $pic = $c['profilePicUrl'] ?? $c['profilePictureUrl'] ?? null;
                     $lastMsg = $c['lastMessage']['message']['conversation']
                         ?? $c['lastMessage']['message']
                         ?? null;
-                    $desc = $lastMsg ? mb_strimwidth($lastMsg, 0, 60, '…') : null;
+                    if (is_array($lastMsg)) {
+                        // Extract first text from message object
+                        $lastMsg = $lastMsg['conversation']
+                            ?? $lastMsg['extendedTextMessage']['text']
+                            ?? null;
+                    }
+                    $desc = $lastMsg ? mb_strimwidth((string) $lastMsg, 0, 60, '…') : null;
 
                     $targets[] = [
-                        'id' => $id,
+                        'id' => $jid,
                         'name' => $name,
                         'picture' => $pic,
                         'description' => $desc,
-                        'phone' => str_replace('@s.whatsapp.net', '', $id),
+                        'phone' => str_replace('@s.whatsapp.net', '', $jid),
                     ];
                 }
 

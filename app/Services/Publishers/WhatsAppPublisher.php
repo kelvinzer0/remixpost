@@ -336,20 +336,25 @@ class WhatsAppPublisher implements PublisherInterface
     }
 
     /**
-     * Fetch all contacts from a connected Evolution API instance.
+     * Fetch all 1:1 chat contacts from a connected Evolution API instance.
      *
      * Returns an array of JID strings (e.g. ["6281234567890@s.whatsapp.net", ...]).
      * Returns empty array on any failure — caller should fall back to allContacts=true.
      *
-     * Endpoint: GET /contact/fetchAllContacts/{instance}
-     * Response shape (Evolution API v2): { contacts: [{ id, name, pushName, ... }] }
-     *   OR raw array: [{ id, ... }, ...]
+     * Endpoint: POST /chat/findChats/{instance} with empty JSON body
+     *   (Evolution API v2.3+ uses POST for find endpoints; GET returns 404.)
+     *
+     * Response: array of chat objects, each with `remoteJid` field that holds
+     *   the JID (e.g. "6281234567890@s.whatsapp.net" for 1:1 chats,
+     *   "120363xxx@g.us" for groups, "status@broadcast" for status).
+     *   We filter to only @s.whatsapp.net (skip groups, channels, broadcast,
+     *   and lid-only contacts which can't receive status broadcasts).
      */
     private function fetchAllContacts(string $evoUrl, string $instance, array $headers): array
     {
         [$ok, $body, $errMsg] = $this->callEvolution(
-            'GET',
-            "{$evoUrl}/contact/fetchAllContacts/{$instance}",
+            'POST',
+            "{$evoUrl}/chat/findChats/{$instance}",
             $headers,
             [],
             'fetch contacts',
@@ -367,15 +372,22 @@ class WhatsAppPublisher implements PublisherInterface
             return [];
         }
 
-        // Handle both response shapes: { contacts: [...] } or [...]
-        $contacts = $decoded['contacts'] ?? (isset($decoded[0]) ? $decoded : []);
+        // Response shape: array of chat objects (not nested under 'chats').
+        $chats = isset($decoded[0]) ? $decoded : [];
 
         $jids = [];
-        foreach ($contacts as $c) {
-            $id = $c['id'] ?? null;
-            // Only include 1:1 chat JIDs (skip groups @g.us and channels @newsletter)
-            if ($id && str_ends_with($id, '@s.whatsapp.net')) {
-                $jids[] = $id;
+        foreach ($chats as $c) {
+            // Chat objects use `remoteJid` for the JID (NOT `id` — that's the
+            // database row ID, often null).
+            $jid = $c['remoteJid'] ?? null;
+            // Only include 1:1 chat JIDs (skip groups @g.us, channels @newsletter,
+            // status@broadcast, and @lid contacts which can't receive status).
+            if ($jid && str_ends_with($jid, '@s.whatsapp.net')) {
+                // Skip WhatsApp system contacts like "0@s.whatsapp.net"
+                if ($jid === '0@s.whatsapp.net') {
+                    continue;
+                }
+                $jids[] = $jid;
             }
         }
 
