@@ -233,20 +233,24 @@ class WhatsAppPublisher implements PublisherInterface
      * Send story/status.
      *
      * Evolution API v2 endpoint: POST /message/sendStatus/{instance}
-     * (NOT /message/sendStatusMessage/{instance} — that route doesn't exist)
      *
-     * Body schema (camelCase, NOT PascalCase — `StatusJidList` fails with
-     * "StatusJidList is required" because the validator only recognizes
-     * `statusJidList`):
+     * Body schema (camelCase, NOT PascalCase):
      *   - type: 'text' | 'image' | 'video' | 'audio' | 'document'
      *   - content: text content (for text) OR media URL (for media)
      *   - caption: optional caption for media
-     *   - statusJidList: array of JIDs (required if allContacts is not true)
-     *   - allContacts: bool (true = broadcast to all contacts)
+     *   - statusJidList: array of JIDs to broadcast to (PREFERRED)
+     *   - allContacts: bool (FALLBACK — see below)
      *   - For text type ONLY: backgroundColor (hex), fontColor (hex), font (int 1+)
      *
-     * We default to `allContacts: true` for story broadcasts — that's the
-     * typical use case (post to all my contacts' story feed).
+     * BROADCAST STRATEGY:
+     * We fetch all contacts first via /contact/fetchAllContacts/{instance},
+     * then send with explicit `statusJidList`. This is more reliable than
+     * `allContacts: true`, which empirically uploads the status to the
+     * sender's phone but often skips the broadcast step — contacts never
+     * see the status even though the sender sees it on their own WhatsApp.
+     *
+     * If contact fetch fails, we fall back to `allContacts: true` so at
+     * least the status uploads (better than nothing).
      */
     private function sendStory(string $evoUrl, string $instance, array $headers, string $caption, array $mediaUrls): array
     {
@@ -265,18 +269,37 @@ class WhatsAppPublisher implements PublisherInterface
                 'type' => $evoMediaType,
                 'content' => $mediaUrl,
                 'caption' => $caption,
-                'allContacts' => true,
             ];
         } else {
             // Text-only story (requires backgroundColor, fontColor, font)
             $payload = [
                 'type' => 'text',
                 'content' => mb_substr($caption, 0, 500), // text content
-                'allContacts' => true,
                 'backgroundColor' => '#008069', // WhatsApp green
                 'fontColor' => '#FFFFFF',
                 'font' => 1, // 1=Arial (font index, must be ≥1 — 0 fails @IsNotEmpty)
             ];
+        }
+
+        // Fetch all contacts from Evolution API to build an explicit
+        // statusJidList. This is more reliable than `allContacts: true`
+        // which empirically uploads the status to the sender's phone but
+        // often skips the broadcast-to-contacts step (status shows on
+        // sender's WhatsApp but contacts never see it).
+        //
+        // With explicit statusJidList, Evolution API is forced to iterate
+        // each JID and broadcast the status — much higher success rate.
+        $contactCount = 0;
+        $contacts = $this->fetchAllContacts($evoUrl, $instance, $headers);
+        if (!empty($contacts)) {
+            // Limit to 256 JIDs (WhatsApp's broadcast limit per status)
+            $jidList = array_slice($contacts, 0, 256);
+            $payload['statusJidList'] = $jidList;
+            $contactCount = count($jidList);
+        } else {
+            // Fallback: allContacts=true if we couldn't fetch the contact
+            // list (better than nothing — at least the status uploads).
+            $payload['allContacts'] = true;
         }
 
         [$ok, $body, $errMsg] = $this->callEvolution(
@@ -285,7 +308,7 @@ class WhatsAppPublisher implements PublisherInterface
             $headers,
             $payload,
             'story',
-            90 // longer timeout for image upload to WhatsApp servers
+            120 // longer timeout: image upload + per-contact broadcast
         );
 
         if (!$ok) {
@@ -301,11 +324,62 @@ class WhatsAppPublisher implements PublisherInterface
             return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $decoded];
         }
 
+        $info = $contactCount > 0
+            ? "Story broadcast to {$contactCount} contacts (explicit statusJidList)"
+            : 'Story uploaded with allContacts=true (could not fetch contact list)';
+
         return [
             'success' => true,
             'external_id' => $messageId,
-            'info' => 'Story broadcast to all contacts',
+            'info' => $info,
         ];
+    }
+
+    /**
+     * Fetch all contacts from a connected Evolution API instance.
+     *
+     * Returns an array of JID strings (e.g. ["6281234567890@s.whatsapp.net", ...]).
+     * Returns empty array on any failure — caller should fall back to allContacts=true.
+     *
+     * Endpoint: GET /contact/fetchAllContacts/{instance}
+     * Response shape (Evolution API v2): { contacts: [{ id, name, pushName, ... }] }
+     *   OR raw array: [{ id, ... }, ...]
+     */
+    private function fetchAllContacts(string $evoUrl, string $instance, array $headers): array
+    {
+        [$ok, $body, $errMsg] = $this->callEvolution(
+            'GET',
+            "{$evoUrl}/contact/fetchAllContacts/{$instance}",
+            $headers,
+            [],
+            'fetch contacts',
+            30
+        );
+
+        if (!$ok) {
+            // Don't fail the whole publish — just return empty so caller
+            // falls back to allContacts=true.
+            return [];
+        }
+
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        // Handle both response shapes: { contacts: [...] } or [...]
+        $contacts = $decoded['contacts'] ?? (isset($decoded[0]) ? $decoded : []);
+
+        $jids = [];
+        foreach ($contacts as $c) {
+            $id = $c['id'] ?? null;
+            // Only include 1:1 chat JIDs (skip groups @g.us and channels @newsletter)
+            if ($id && str_ends_with($id, '@s.whatsapp.net')) {
+                $jids[] = $id;
+            }
+        }
+
+        return $jids;
     }
 
     /**
