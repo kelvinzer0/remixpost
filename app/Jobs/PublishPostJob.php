@@ -111,12 +111,33 @@ class PublishPostJob implements ShouldQueue
                     $note = '[INFO] ' . $result['info'];
                 }
             }
+
+            Log::info("PublishPostJob updating pivot", [
+                'post_id' => $post->id,
+                'account_id' => $account->id,
+                'success' => $result['success'] ?? false,
+                'external_id_to_set' => $result['external_id'] ?? null,
+                'note_to_set' => $note,
+                'error_to_set' => $result['success'] ? null : ($result['error'] ?? 'Unknown error'),
+            ]);
+
             $post->socialAccounts()->updateExistingPivot($account->id, [
                 'external_post_id' => $result['external_id'] ?? null,
                 'failure_reason' => $result['success']
                     ? $note  // null on clean success, or [WARNING]/[INFO] note
                     : ($result['error'] ?? 'Unknown error'),
                 'published_at' => $result['success'] ? now() : null,
+            ]);
+
+            // Verify pivot was actually updated
+            $post->refresh();
+            $verifyPivot = $post->socialAccounts()->wherePivot('social_account_id', $account->id)->first();
+            Log::info("PublishPostJob pivot after update", [
+                'post_id' => $post->id,
+                'account_id' => $account->id,
+                'pivot_published_at' => $verifyPivot ? $verifyPivot->pivot->published_at : 'PIVOT_ROW_MISSING',
+                'pivot_external_id' => $verifyPivot ? $verifyPivot->pivot->external_post_id : 'PIVOT_ROW_MISSING',
+                'pivot_failure_reason' => $verifyPivot ? $verifyPivot->pivot->failure_reason : 'PIVOT_ROW_MISSING',
             ]);
 
             // Check if all accounts are done
