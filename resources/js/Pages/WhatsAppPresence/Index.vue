@@ -274,7 +274,10 @@ const totalOnline = computed(() => props.heatmap.reduce((sum, h) => sum + h.onli
                                     {{ (c.name || '?').charAt(0).toUpperCase() }}
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-xs font-medium text-gray-900 truncate">{{ c.name }}</p>
+                                    <div class="flex items-center gap-1">
+                                        <p class="text-xs font-medium text-gray-900 truncate">{{ c.name }}</p>
+                                        <span v-if="c.is_saved" class="px-1 py-0.5 text-[9px] font-semibold rounded bg-blue-100 text-blue-700 flex-shrink-0">SAVED</span>
+                                    </div>
                                     <p class="text-[10px] text-gray-500 font-mono truncate">{{ c.phone }}</p>
                                 </div>
                                 <svg v-if="form.jid === c.jid" class="w-4 h-4 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">

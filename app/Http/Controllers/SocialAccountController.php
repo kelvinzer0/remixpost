@@ -2120,12 +2120,13 @@ class SocialAccountController extends Controller
                     ];
                 }
             } else {
-                // target_type === 'user' — fetch recent 1:1 chats
-                // POST /chat/findChats/{instance} (Evolution API v2.3+ uses POST
-                // for find endpoints; older GET /chat/fetchChats/{instance}
-                // returns 404 on v2.3+).
+                // target_type === 'user' — fetch 1:1 contacts.
+                // Use POST /chat/findContacts/{instance} (Evolution API v2.3+)
+                // — returns proper pushName at top-level (unlike /chat/findChats
+                // which stores pushName inside lastMessage and is null at
+                // chat level for most contacts).
                 $resp = Http::withHeaders($headers)
-                    ->post("{$evoUrl}/chat/findChats/{$instance}", []);
+                    ->post("{$evoUrl}/chat/findContacts/{$instance}", []);
 
                 if (!$resp->ok()) {
                     return response()->json([
@@ -2134,34 +2135,30 @@ class SocialAccountController extends Controller
                 }
 
                 $data = $resp->json();
-                // Response shape: array of chat objects (top-level array, NOT
-                // nested under 'chats').
-                $chats = is_array($data) && isset($data[0]) ? $data : ($data['chats'] ?? []);
+                // Response shape: top-level array of contact objects.
+                $contactsRaw = is_array($data) && isset($data[0]) ? $data : ($data['contacts'] ?? []);
 
-                foreach ($chats as $c) {
-                    // Chat objects use `remoteJid` for the JID (NOT `id` — that's
-                    // the database row ID, often null).
+                foreach ($contactsRaw as $c) {
                     $jid = $c['remoteJid'] ?? null;
                     if (!$jid) continue;
                     // Only 1:1 chats (skip groups/channels/broadcast/lid)
                     if (!str_ends_with($jid, '@s.whatsapp.net')) continue;
                     // Skip WhatsApp system contact "0@s.whatsapp.net"
                     if ($jid === '0@s.whatsapp.net') continue;
+                    // Skip group-tagged contacts
+                    if (!empty($c['isGroup'])) continue;
 
-                    $name = $c['pushName'] ?? $c['name'] ?? $c['formattedName'] ?? null;
-                    if (!$name) continue; // skip chats without a name
-
-                    $pic = $c['profilePicUrl'] ?? $c['profilePictureUrl'] ?? null;
-                    $lastMsg = $c['lastMessage']['message']['conversation']
-                        ?? $c['lastMessage']['message']
-                        ?? null;
-                    if (is_array($lastMsg)) {
-                        // Extract first text from message object
-                        $lastMsg = $lastMsg['conversation']
-                            ?? $lastMsg['extendedTextMessage']['text']
-                            ?? null;
+                    // pushName may be null — fall back to phone number
+                    $name = $c['pushName'] ?? null;
+                    // 'Você' (Portuguese 'You') is what WhatsApp returns for
+                    // messages sent by the user themselves — useless as a name.
+                    if (!$name || strtolower($name) === 'você' || trim($name) === '') {
+                        $name = str_replace('@s.whatsapp.net', '', $jid);
                     }
-                    $desc = $lastMsg ? mb_strimwidth((string) $lastMsg, 0, 60, '…') : null;
+
+                    $pic = $c['profilePicUrl'] ?? null;
+                    $isSaved = !empty($c['isSaved']);
+                    $desc = $isSaved ? 'Saved contact' : null;
 
                     $targets[] = [
                         'id' => $jid,
@@ -2172,8 +2169,13 @@ class SocialAccountController extends Controller
                     ];
                 }
 
-                // Sort by name (alphabetical) for easier scanning
-                usort($targets, fn($a, $b) => strcmp($a['name'], $b['name']));
+                // Sort: saved contacts first, then alphabetical
+                usort($targets, function ($a, $b) {
+                    $aSaved = $a['description'] === 'Saved contact' ? 1 : 0;
+                    $bSaved = $b['description'] === 'Saved contact' ? 1 : 0;
+                    if ($aSaved !== $bSaved) return $bSaved - $aSaved;
+                    return strcmp($a['name'], $b['name']);
+                });
             }
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to fetch targets: ' . $e->getMessage()], 500);

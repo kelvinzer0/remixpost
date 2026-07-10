@@ -177,12 +177,15 @@ class WhatsAppPresenceController extends Controller
             return response()->json(['error' => 'WhatsApp Evolution API config missing. Re-connect the account.'], 400);
         }
 
-        // Fetch all chats (POST /chat/findChats — Evolution API v2.3+)
+        // Fetch contacts via POST /chat/findContacts/{instance}
+        // (Evolution API v2.3+ — returns proper pushName + isGroup + type fields,
+        // unlike /chat/findChats which stores pushName inside lastMessage only
+        // and is null at the chat level for most contacts.)
         try {
             $response = \Illuminate\Support\Facades\Http::withHeaders([
                 'apikey' => $apiKey,
                 'Content-Type' => 'application/json',
-            ])->timeout(30)->post("{$evoUrl}/chat/findChats/{$instance}", []);
+            ])->timeout(30)->post("{$evoUrl}/chat/findContacts/{$instance}", []);
 
             if (!$response->ok()) {
                 return response()->json([
@@ -191,7 +194,7 @@ class WhatsAppPresenceController extends Controller
             }
 
             $data = $response->json();
-            $chats = is_array($data) && isset($data[0]) ? $data : ($data['chats'] ?? []);
+            $contactsRaw = is_array($data) && isset($data[0]) ? $data : ($data['contacts'] ?? []);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to fetch contacts: ' . $e->getMessage()], 500);
         }
@@ -205,28 +208,27 @@ class WhatsAppPresenceController extends Controller
 
         // Build contact list — only 1:1 chats not already consented
         $contacts = [];
-        foreach ($chats as $c) {
+        foreach ($contactsRaw as $c) {
             $jid = $c['remoteJid'] ?? null;
             if (!$jid || !str_ends_with($jid, '@s.whatsapp.net')) continue;
             if ($jid === '0@s.whatsapp.net') continue; // skip WhatsApp system
             if (in_array($jid, $existingJids)) continue; // skip already consented
+            // Skip groups (some contacts are tagged isGroup=true even with @s.whatsapp.net JID)
+            if (!empty($c['isGroup'])) continue;
 
             $name = $c['pushName'] ?? null;
-            // Skip contacts without a name — they're usually unknown numbers
-            // that the user has never chatted with meaningfully.
-            if (!$name) continue;
+            // Use phone number as name fallback if pushName is null/empty
+            if (!$name || trim($name) === '') {
+                $name = str_replace('@s.whatsapp.net', '', $jid);
+            }
 
-            // Format last active time
+            // Format last active time from updatedAt field
             $lastActive = null;
-            $lastMsg = $c['lastMessage'] ?? null;
-            if ($lastMsg) {
-                $ts = $lastMsg['messageTimestamp'] ?? ($lastMsg['timestamp'] ?? null);
-                if ($ts) {
-                    try {
-                        $lastActive = \Carbon\Carbon::createFromTimestamp((int) $ts)->toIso8601String();
-                    } catch (\Exception $e) {
-                        // leave null
-                    }
+            if (!empty($c['updatedAt'])) {
+                try {
+                    $lastActive = \Carbon\Carbon::parse($c['updatedAt'])->toIso8601String();
+                } catch (\Exception $e) {
+                    // leave null
                 }
             }
 
@@ -236,11 +238,17 @@ class WhatsAppPresenceController extends Controller
                 'name' => $name,
                 'picture' => $c['profilePicUrl'] ?? null,
                 'last_active_at' => $lastActive,
+                'is_saved' => !empty($c['isSaved']),
             ];
         }
 
-        // Sort by name alphabetically for easy scanning
-        usort($contacts, fn($a, $b) => strcmp($a['name'], $b['name']));
+        // Sort: saved contacts first, then by name alphabetically
+        usort($contacts, function ($a, $b) {
+            if ($a['is_saved'] !== $b['is_saved']) {
+                return $b['is_saved'] ? 1 : -1;
+            }
+            return strcmp($a['name'], $b['name']);
+        });
 
         return response()->json([
             'contacts' => $contacts,

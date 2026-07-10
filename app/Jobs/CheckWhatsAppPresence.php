@@ -166,9 +166,18 @@ class CheckWhatsAppPresence implements ShouldQueue
                 'sampled_at' => now(),
             ]);
 
-            // Update display_name from chat if we don't have it
-            if (!$consent->display_name && !empty($targetChat['pushName'])) {
-                $consent->update(['display_name' => $targetChat['pushName']]);
+            // Update display_name from chat — try chat-level pushName first,
+            // then lastMessage.pushName (which is where Evolution API v2.3.7
+            // actually stores it for most chats), then phone as last resort.
+            if (!$consent->display_name) {
+                $name = $targetChat['pushName']
+                    ?? ($targetChat['lastMessage']['pushName'] ?? null);
+                // pushName 'Você' (Portuguese for 'You') is what WhatsApp
+                // returns for messages sent BY the user — useless as contact
+                // name. Skip it and fall back to phone.
+                if ($name && strtolower($name) !== 'você' && trim($name) !== '') {
+                    $consent->update(['display_name' => $name]);
+                }
             }
 
             Log::info("CheckWhatsAppPresence: sample stored", [
