@@ -195,9 +195,10 @@ class WhatsAppPublisher implements PublisherInterface
         $payload = [
             'number' => $number,
             'mediatype' => $evoMediaType,
-            'media' => [
-                'url' => $mediaUrl,
-            ],
+            // Evolution API v2.3.7 expects `media` as a STRING (URL directly),
+            // NOT an object. Sending {url: '...'} returns 400:
+            //   "media is not of a type(s) string"
+            'media' => $mediaUrl,
             'caption' => $caption,
             'options' => [
                 'delay' => 1000,
