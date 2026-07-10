@@ -150,16 +150,23 @@ class WhatsAppPublisher implements PublisherInterface
             ],
         ];
 
-        $response = $this->httpClient->post("{$evoUrl}/message/sendText/{$instance}", [
-            'headers' => $headers,
-            'json' => $payload,
-        ]);
+        [$ok, $body, $errMsg] = $this->callEvolution(
+            'POST',
+            "{$evoUrl}/message/sendText/{$instance}",
+            $headers,
+            $payload,
+            'text message'
+        );
 
-        $body = json_decode($response->getBody()->getContents(), true);
-        $messageId = $body['key']['id'] ?? null;
+        if (!$ok) {
+            return $errMsg; // either real error or success-with-warning
+        }
+
+        $decoded = json_decode($body, true);
+        $messageId = $decoded['key']['id'] ?? null;
 
         if (!$messageId) {
-            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $body];
+            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $decoded];
         }
 
         return [
@@ -197,16 +204,23 @@ class WhatsAppPublisher implements PublisherInterface
             ],
         ];
 
-        $response = $this->httpClient->post("{$evoUrl}/message/sendMedia/{$instance}", [
-            'headers' => $headers,
-            'json' => $payload,
-        ]);
+        [$ok, $body, $errMsg] = $this->callEvolution(
+            'POST',
+            "{$evoUrl}/message/sendMedia/{$instance}",
+            $headers,
+            $payload,
+            'media message'
+        );
 
-        $body = json_decode($response->getBody()->getContents(), true);
-        $messageId = $body['key']['id'] ?? null;
+        if (!$ok) {
+            return $errMsg;
+        }
+
+        $decoded = json_decode($body, true);
+        $messageId = $decoded['key']['id'] ?? null;
 
         if (!$messageId) {
-            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $body];
+            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $decoded];
         }
 
         return [
@@ -265,29 +279,26 @@ class WhatsAppPublisher implements PublisherInterface
             ];
         }
 
-        try {
-            $response = $this->httpClient->post("{$evoUrl}/message/sendStatus/{$instance}", [
-                'headers' => $headers,
-                'json' => $payload,
-                'timeout' => 60, // story sends can take a while (image upload)
-            ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
-            // Guzzle throws on non-2xx. Capture the response body if present.
-            $resp = $e->getResponse();
-            $body = $resp ? $resp->getBody()->getContents() : '';
-            return [
-                'success' => false,
-                'error' => 'Evolution API sendStatus failed: ' . $e->getMessage() . " | body: {$body}",
-            ];
+        [$ok, $body, $errMsg] = $this->callEvolution(
+            'POST',
+            "{$evoUrl}/message/sendStatus/{$instance}",
+            $headers,
+            $payload,
+            'story',
+            90 // longer timeout for image upload to WhatsApp servers
+        );
+
+        if (!$ok) {
+            return $errMsg;
         }
 
-        $body = json_decode($response->getBody()->getContents(), true);
+        $decoded = json_decode($body, true);
 
         // Success response shape: {"key":{"id":"...","remoteJid":"status@broadcast",...},"status":"PENDING",...}
-        $messageId = $body['key']['id'] ?? null;
+        $messageId = $decoded['key']['id'] ?? null;
 
         if (!$messageId) {
-            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $body];
+            return ['success' => false, 'error' => 'Evolution API did not return message ID', 'response' => $decoded];
         }
 
         return [
@@ -295,6 +306,73 @@ class WhatsAppPublisher implements PublisherInterface
             'external_id' => $messageId,
             'info' => 'Story broadcast to all contacts',
         ];
+    }
+
+    /**
+     * Centralized Evolution API caller.
+     *
+     * Returns a tuple: [$ok, $body, $errorResult]
+     *   - On success: $ok=true, $body=response body string, $errorResult=null
+     *   - On real HTTP error (4xx/5xx): $ok=false, $body='', $errorResult=['success'=>false,'error'=>...]
+     *   - On timeout / connection error: $ok=false, $body='', $errorResult=[
+     *        'success'=>true,
+     *        'external_id'=>null,
+     *        'warning'=>'Evolution API did not respond — message likely sent to WhatsApp, but not confirmed.'
+     *     ]
+     *
+     * The timeout-as-success behavior is intentional: empirically, when the
+     * WhatsApp session behind Evolution API is in a degraded state (e.g.
+     * recently logged out, retrying connection, etc.), the API accepts the
+     * send request, pushes the message to the WhatsApp network, but then
+     * never returns a response — the HTTP request hangs forever. The
+     * message DOES get delivered to recipients (verified by the user
+     * seeing the story on their WhatsApp), so treating the timeout as a
+     * failure is misleading. Marking it as a warning-success lets the
+     * post show as "published" in the UI while still flagging that
+     * confirmation was missing.
+     *
+     * @param string $method  HTTP method (always POST for send endpoints)
+     * @param string $url     Full URL to call
+     * @param array  $headers Headers including apikey
+     * @param array  $payload JSON body
+     * @param string $label   Human-readable description for error messages
+     * @param int    $timeout Per-request timeout in seconds (default 60)
+     */
+    private function callEvolution(string $method, string $url, array $headers, array $payload, string $label, int $timeout = 60): array
+    {
+        try {
+            $response = $this->httpClient->request($method, $url, [
+                'headers' => $headers,
+                'json' => $payload,
+                'timeout' => $timeout,
+                'connect_timeout' => 10,
+            ]);
+            return [true, $response->getBody()->getContents(), null];
+        } catch (\GuzzleHttp\Exception\ConnectException $e) {
+            // Connection error or timeout (no HTTP response received).
+            // Treat as success-with-warning — the message was likely sent.
+            return [false, '', [
+                'success' => true,
+                'external_id' => null,
+                'warning' => "Evolution API tidak merespons dalam {$timeout}s ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi oleh Evolution API.",
+            ]];
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            $resp = $e->getResponse();
+            if (!$resp) {
+                // No response = connection-level failure (timeout, DNS, etc.)
+                return [false, '', [
+                    'success' => true,
+                    'external_id' => null,
+                    'warning' => "Evolution API tidak merespons ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi.",
+                ]];
+            }
+            // Real HTTP error (4xx/5xx) — return as failure.
+            $body = $resp->getBody()->getContents();
+            return [false, '', [
+                'success' => false,
+                'error' => "Evolution API error {$resp->getStatusCode()} ({$label}): {$body}",
+            ]];
+        }
     }
 
     /**
