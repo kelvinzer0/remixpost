@@ -412,6 +412,10 @@ class WatermarkService
 
     /**
      * Load image from file path using GD.
+     * Automatically applies EXIF orientation correction for JPEGs
+     * (photos taken on phones in portrait mode have EXIF orientation
+     * tag set, but GD does not auto-apply it — resulting in rotated
+     * watermarked images if we don't manually fix the orientation).
      */
     private static function loadImage(string $path): ?\GdImage
     {
@@ -421,7 +425,7 @@ class WatermarkService
 
         $mime = mime_content_type($path);
 
-        return match ($mime) {
+        $image = match ($mime) {
             'image/jpeg' => @imagecreatefromjpeg($path) ?: null,
             'image/png'  => @imagecreatefrompng($path) ?: null,
             'image/gif'  => @imagecreatefromgif($path) ?: null,
@@ -429,5 +433,94 @@ class WatermarkService
             'image/bmp'  => @imagecreatefrombmp($path) ?: null,
             default      => null,
         };
+
+        if (!$image) {
+            return null;
+        }
+
+        // Apply EXIF orientation correction (only JPEG has EXIF metadata)
+        if ($mime === 'image/jpeg') {
+            $image = self::applyExifOrientation($path, $image);
+        }
+
+        return $image;
+    }
+
+    /**
+     * Apply EXIF orientation to a GD image.
+     *
+     * EXIF Orientation tag values:
+     *   1 = Normal (no rotation)
+     *   3 = Rotated 180°
+     *   6 = Rotated 90° CW  (camera held portrait, top to right)
+     *   8 = Rotated 90° CCW (camera held portrait, top to left)
+     *   2,4,5,7 = Mirrored variants (rare in phone photos)
+     *
+     * PHP imagerotate() rotates COUNTERCLOCKWISE by `angle` degrees:
+     *   Orientation 3 (180°):   imagerotate(image, 180) — 180° either way = same
+     *   Orientation 6 (90° CW): imagerotate(image, 90)  — 90° CCW = corrects CW
+     *   Orientation 8 (90° CCW): imagerotate(image, -90) — -90° CCW = 90° CW = corrects CCW
+     *
+     * @param string   $path   File path (for reading EXIF)
+     * @param \GdImage $image  Loaded GD image
+     * @return \GdImage  Corrected image (rotated if needed)
+     */
+    private static function applyExifOrientation(string $path, \GdImage $image): \GdImage
+    {
+        if (!function_exists('exif_read_data')) {
+            return $image;
+        }
+
+        // Suppress warnings — some JPEGs have corrupt EXIF blocks
+        $exif = @exif_read_data($path);
+        if (!$exif || empty($exif['Orientation'])) {
+            return $image;
+        }
+
+        $orientation = (int) $exif['Orientation'];
+        $bg = imagecolorallocatealpha($image, 0, 0, 0, 127);
+
+        switch ($orientation) {
+            case 3:
+                $rotated = imagerotate($image, 180, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 6:
+                $rotated = imagerotate($image, 90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 8:
+                $rotated = imagerotate($image, -90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            // Mirrored variants — flip then rotate (rare in phone photos,
+            // but handle for completeness). Uses imageflip() (PHP 5.4+).
+            case 2: // Mirrored horizontal
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                return $image;
+
+            case 4: // Mirrored vertical
+                imageflip($image, IMG_FLIP_VERTICAL);
+                return $image;
+
+            case 5: // Mirrored horizontal + 90 CW
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                $rotated = imagerotate($image, 90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 7: // Mirrored horizontal + 90 CCW
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                $rotated = imagerotate($image, -90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 1: // Normal — no correction needed
+            default:
+                return $image;
+        }
     }
 }

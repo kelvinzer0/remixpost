@@ -164,6 +164,7 @@ class PdfImageMerger
 
     /**
      * Load an image from file path using GD, based on MIME type.
+     * Automatically applies EXIF orientation correction for JPEGs.
      */
     private static function loadImage(string $path): ?\GdImage
     {
@@ -173,7 +174,7 @@ class PdfImageMerger
 
         $mime = mime_content_type($path);
 
-        return match ($mime) {
+        $image = match ($mime) {
             'image/jpeg' => @imagecreatefromjpeg($path) ?: null,
             'image/png'  => @imagecreatefrompng($path) ?: null,
             'image/gif'  => @imagecreatefromgif($path) ?: null,
@@ -181,6 +182,89 @@ class PdfImageMerger
             'image/bmp'  => @imagecreatefrombmp($path) ?: null,
             default      => null,
         };
+
+        if (!$image) {
+            return null;
+        }
+
+        // Apply EXIF orientation correction (only JPEG has EXIF metadata)
+        if ($mime === 'image/jpeg') {
+            $image = self::applyExifOrientation($path, $image);
+        }
+
+        return $image;
+    }
+
+    /**
+     * Apply EXIF orientation to a GD image.
+     *
+     * EXIF Orientation tag values:
+     *   1 = Normal (no rotation)
+     *   3 = Rotated 180°
+     *   6 = Rotated 90° CW  (camera held portrait, top to right)
+     *   8 = Rotated 90° CCW (camera held portrait, top to left)
+     *   2,4,5,7 = Mirrored variants (rare in phone photos)
+     *
+     * PHP imagerotate() rotates COUNTERCLOCKWISE by `angle` degrees.
+     *
+     * @param string   $path   File path (for reading EXIF)
+     * @param \GdImage $image  Loaded GD image
+     * @return \GdImage  Corrected image (rotated if needed)
+     */
+    private static function applyExifOrientation(string $path, \GdImage $image): \GdImage
+    {
+        if (!function_exists('exif_read_data')) {
+            return $image;
+        }
+
+        $exif = @exif_read_data($path);
+        if (!$exif || empty($exif['Orientation'])) {
+            return $image;
+        }
+
+        $orientation = (int) $exif['Orientation'];
+        $bg = imagecolorallocatealpha($image, 0, 0, 0, 127);
+
+        switch ($orientation) {
+            case 3:
+                $rotated = imagerotate($image, 180, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 6:
+                $rotated = imagerotate($image, 90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 8:
+                $rotated = imagerotate($image, -90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 2:
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                return $image;
+
+            case 4:
+                imageflip($image, IMG_FLIP_VERTICAL);
+                return $image;
+
+            case 5:
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                $rotated = imagerotate($image, 90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 7:
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                $rotated = imagerotate($image, -90, $bg);
+                imagedestroy($image);
+                return $rotated;
+
+            case 1:
+            default:
+                return $image;
+        }
     }
 
     /**
