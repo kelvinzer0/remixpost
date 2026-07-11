@@ -375,4 +375,13 @@ class MediaCompressionService
         }
         return null;
     }
+
+    /**
+     * Public alias for findFfmpeg — allows other services (e.g. BufferPublisher
+     * for Pinterest video thumbnails) to locate ffmpeg without duplicating logic.
+     */
+    public static function findFfmpegPublic(): ?string
+    {
+        return self::findFfmpeg();
+    }
 }

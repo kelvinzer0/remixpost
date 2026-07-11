@@ -119,6 +119,16 @@ class BufferPublisher implements PublisherInterface
                 }
             }
 
+            // Pinterest via Buffer only accepts IMAGE assets (no video pins supported).
+            // If user attaches a video for Pinterest, auto-generate a thumbnail from
+            // the video using ffmpeg and send it as the image asset. Pinterest will
+            // display the thumbnail as a static pin with the post caption.
+            // (Pinterest's own API supports "Idea Pins" with video, but Buffer's
+            // GraphQL PinterestPostMetadataInput only accepts image assets.)
+            if ($channelService === 'pinterest') {
+                $mediaUrls = $this->convertVideosToThumbnails($mediaUrls);
+            }
+
             // Build assets array from media URLs
             $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
 
@@ -372,6 +382,183 @@ class BufferPublisher implements PublisherInterface
             // Skip documents — Buffer requires title + thumbnail which we don't have
         }
         return $assets;
+    }
+
+    /**
+     * Convert video URLs to thumbnail image URLs (for Pinterest).
+     *
+     * Buffer's Pinterest integration only accepts image assets — it does NOT
+     * support video pins. When a user attaches a video to publish to Pinterest,
+     * we extract a frame from the video using ffmpeg and use that as the pin
+     * image. The video itself cannot be posted to Pinterest via Buffer.
+     *
+     * Behavior:
+     *   - Image URLs: pass through unchanged
+     *   - Video URLs: generate thumbnail (1280px wide JPEG, frame at ~1s mark),
+     *     save to storage/app/public/compressed/, return public URL
+     *   - If thumbnail generation fails: log warning and SKIP that media
+     *     (sending nothing is better than sending a video URL that Buffer will
+     *      reject with "Pinterest posts require at least one image")
+     *
+     * @param array $mediaUrls  Original media URLs (mix of images/videos)
+     * @return array            Media URLs with videos replaced by thumbnails
+     */
+    private function convertVideosToThumbnails(array $mediaUrls): array
+    {
+        $result = [];
+        foreach ($mediaUrls as $url) {
+            $type = MediaType::fromUrl($url);
+            if ($type !== 'video') {
+                $result[] = $url;
+                continue;
+            }
+
+            $thumbUrl = $this->generateVideoThumbnail($url);
+            if ($thumbUrl) {
+                Log::info('Pinterest: generated thumbnail from video', [
+                    'video_url' => $url,
+                    'thumbnail_url' => $thumbUrl,
+                ]);
+                $result[] = $thumbUrl;
+            } else {
+                Log::warning('Pinterest: failed to generate video thumbnail, skipping media', [
+                    'video_url' => $url,
+                ]);
+                // Skip — don't add the video URL because Buffer will reject it
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Generate a thumbnail JPEG from a video URL using ffmpeg.
+     *
+     * Strategy:
+     *   1. Resolve to local file path (or download to temp file)
+     *   2. Extract frame at 00:00:01 (1 second in) — avoids black intro frames
+     *   3. Scale to max 1280px wide, maintain aspect ratio
+     *   4. Save as JPEG quality 90 in storage/app/public/compressed/
+     *   5. Return public URL
+     *
+     * @param string $videoUrl  URL or local path of video
+     * @return string|null      Public URL of thumbnail, or null on failure
+     */
+    private function generateVideoThumbnail(string $videoUrl): ?string
+    {
+        $ffmpeg = \App\Services\MediaCompressionService::findFfmpegPublic()
+            ?? $this->findFfmpegLocal();
+        if (!$ffmpeg) {
+            Log::warning('ffmpeg not found, cannot generate video thumbnail');
+            return null;
+        }
+
+        // Try to resolve to local file path (avoid network download)
+        $localPath = $this->resolveLocalVideoPath($videoUrl);
+        $tempInput = null;
+
+        if (!$localPath) {
+            // Download to temp file
+            $tempInput = tempnam(sys_get_temp_dir(), 'vid_in_');
+            try {
+                $response = Http::get($videoUrl);
+                if (!$response->ok()) {
+                    Log::warning('Failed to download video for thumbnail', ['url' => $videoUrl]);
+                    @unlink($tempInput);
+                    return null;
+                }
+                file_put_contents($tempInput, $response->body());
+                $localPath = $tempInput;
+            } catch (\Exception $e) {
+                Log::warning('Exception downloading video for thumbnail: ' . $e->getMessage());
+                @unlink($tempInput);
+                return null;
+            }
+        }
+
+        // Ensure compressed directory exists
+        \Illuminate\Support\Facades\Storage::disk('public')->makeDirectory('compressed');
+
+        $filename = 'thumb_' . time() . '_' . uniqid() . '.jpg';
+        $outputPath = storage_path('app/public/compressed/' . $filename);
+
+        // Extract frame at 1 second, scale to max 1280 wide maintaining aspect ratio
+        // -ss before -i = fast seek (keyframe-based, near-instant)
+        // scale='min(1280,iw)':-2 = cap width at 1280, auto-calc height (even number)
+        $cmd = sprintf(
+            '%s -ss 00:00:01 -i %s -frames:v 1 -vf "scale=\'min(1280,iw)\':-2" -q:v 2 -y %s 2>&1',
+            escapeshellarg($ffmpeg),
+            escapeshellarg($localPath),
+            escapeshellarg($outputPath)
+        );
+
+        $output = shell_exec($cmd);
+
+        // Cleanup temp input if we downloaded it
+        if ($tempInput) {
+            @unlink($tempInput);
+        }
+
+        if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+            // Try fallback: extract first frame (some short videos < 1s)
+            $cmdFallback = sprintf(
+                '%s -i %s -frames:v 1 -vf "scale=\'min(1280,iw)\':-2" -q:v 2 -y %s 2>&1',
+                escapeshellarg($ffmpeg),
+                escapeshellarg($localPath),
+                escapeshellarg($outputPath)
+            );
+            shell_exec($cmdFallback);
+
+            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+                Log::warning('ffmpeg thumbnail generation failed', [
+                    'video_url' => $videoUrl,
+                    'ffmpeg_output' => substr($output ?? '', -500),
+                ]);
+                return null;
+            }
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('public')->url('compressed/' . $filename);
+    }
+
+    /**
+     * Resolve public storage URL to local file path (for video files).
+     * Same logic as MediaCompressionService::resolveLocalPath but exposed here
+     * to avoid tight coupling.
+     */
+    private function resolveLocalVideoPath(string $url): ?string
+    {
+        $appUrl = config('app.url');
+        if (!str_starts_with($url, $appUrl)) {
+            return null;
+        }
+
+        $storagePrefix = rtrim($appUrl, '/') . '/storage/';
+        if (!str_starts_with($url, $storagePrefix)) {
+            return null;
+        }
+
+        $relativePath = substr($url, strlen($storagePrefix));
+        $localPath = storage_path('app/public/' . $relativePath);
+
+        return file_exists($localPath) ? $localPath : null;
+    }
+
+    /**
+     * Find ffmpeg binary (fallback if MediaCompressionService doesn't expose it).
+     */
+    private function findFfmpegLocal(): ?string
+    {
+        $candidates = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+        foreach ($candidates as $c) {
+            $result = shell_exec("which $c 2>/dev/null");
+            if ($result) {
+                return trim($result);
+            }
+            if (file_exists($c) && is_executable($c)) {
+                return $c;
+            }
+        }
+        return null;
     }
 
     /**
