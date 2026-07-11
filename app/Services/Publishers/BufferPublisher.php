@@ -244,14 +244,23 @@ class BufferPublisher implements PublisherInterface
         }
 
         // Instagram post type (post/reel/story) — from channel metadata or per-post override
-        // Stored as 'instagram_post_type' in overrides, but Buffer GraphQL expects 'type' field
-        // inside InstagramPostMetadataInput. GraphQL enum values must be UPPERCASE.
+        // Buffer GraphQL schema (verified via introspection):
+        //   InstagramPostMetadataInput {
+        //     type: PostType!              (REQUIRED — enum: post, reel, story, short, carousel, etc.)
+        //     firstComment: String         (optional)
+        //     link: String                 (optional)
+        //     shouldShareToFeed: Boolean!  (REQUIRED — whether to also post to IG feed)
+        //     geolocation: ...             (optional)
+        //     stickerFields: ...           (optional)
+        //     isAiGenerated: Boolean       (optional)
+        //   }
+        //
+        // PostType enum values are LOWERCASE: post, reel, story (NOT POST/REEL/STORY)
         if ($channelService === 'instagram') {
             $postType = $accountMetadata['instagram_post_type'] ?? null;
             if ($postType) {
-                // Buffer GraphQL PostType enum: POST, REEL, STORY (uppercase)
-                $postTypeUpper = strtoupper($postType);
-                $igParts = ["type: {$postTypeUpper}"];
+                $igParts = ["type: {$postType}"];  // lowercase — enum values
+                $igParts[] = "shouldShareToFeed: true";  // REQUIRED field — share to IG feed
                 if (!empty($firstComment)) {
                     $igParts[] = "firstComment: " . json_encode($firstComment);
                 }
