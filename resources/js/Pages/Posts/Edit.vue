@@ -228,6 +228,17 @@ const setOverride = (accountId, key, value) => {
     form.account_overrides[accountId][key] = value;
 };
 
+// Set sticker field (music, products, topics, other) for IG Notify Me reminders
+const setStickerField = (accountId, field, value) => {
+    if (!form.account_overrides[accountId]) {
+        form.account_overrides[accountId] = {};
+    }
+    if (!form.account_overrides[accountId].sticker_fields) {
+        form.account_overrides[accountId].sticker_fields = {};
+    }
+    form.account_overrides[accountId].sticker_fields[field] = value;
+};
+
 const onAccountToggle = (accountId) => {
     const account = props.accounts.find(a => a.id === accountId);
     if (!account) return;
@@ -775,6 +786,52 @@ const supportsTags = computed(() => {
                                             <span class="text-xs text-gray-700">⚡ Auto-publish</span>
                                             <span class="text-[9px] text-gray-400">(tanpa sound/sticker)</span>
                                         </label>
+                                    </div>
+                                </div>
+
+                                <!-- Sticker reminder fields (IG only, Notify Me mode only) -->
+                                <div v-if="isBufferInstagram(account)
+                                        && (form.account_overrides[account.id]?.scheduling_type || 'notification') === 'notification'"
+                                    class="p-2 bg-blue-50/50 border border-blue-200 rounded space-y-2">
+                                    <p class="text-xs font-medium text-gray-700">
+                                        📝 Reminder Notes (muncul di Buffer mobile app saat notifikasi)
+                                    </p>
+                                    <p class="text-[10px] text-gray-500">
+                                        Isi reminder untuk diri sendiri — Buffer akan tampilkan teks ini saat
+                                        notifikasi tiba, supaya kamu ingat music/product apa yang harus ditambah
+                                        saat edit di IG native app.
+                                    </p>
+                                    <div>
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5">🎵 Music</label>
+                                        <input type="text" maxlength="200"
+                                            :value="form.account_overrides[account.id]?.sticker_fields?.music || ''"
+                                            @input="setStickerField(account.id, 'music', $event.target.value)"
+                                            placeholder="mis. Add viral sound: Sephelia - Bliss"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-blue-500 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5">🏷️ Tag Products</label>
+                                        <input type="text" maxlength="200"
+                                            :value="form.account_overrides[account.id]?.sticker_fields?.products || ''"
+                                            @input="setStickerField(account.id, 'products', $event.target.value)"
+                                            placeholder="mis. Tag product: Mie Jebew Special"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-blue-500 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5"># Topics (Reels only)</label>
+                                        <input type="text" maxlength="200"
+                                            :value="form.account_overrides[account.id]?.sticker_fields?.topics || ''"
+                                            @input="setStickerField(account.id, 'topics', $event.target.value)"
+                                            placeholder="mis. #kulinerblitar #jajananblitar"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-blue-500 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-medium text-gray-600 mb-0.5">📝 Other notes</label>
+                                        <input type="text" maxlength="500"
+                                            :value="form.account_overrides[account.id]?.sticker_fields?.other || ''"
+                                            @input="setStickerField(account.id, 'other', $event.target.value)"
+                                            placeholder="Catatan tambahan untuk reminder"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm text-xs focus:border-blue-500 focus:ring-blue-500" />
                                     </div>
                                 </div>
                             </div>

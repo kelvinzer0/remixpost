@@ -160,8 +160,6 @@ class BufferPublisher implements PublisherInterface
             // Build assets array from media URLs
             $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
 
-            $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata);
-
             // Scheduling type logic (verified via Buffer GraphQL introspection 2026-07-12):
             //   SchedulingType enum: 'automatic' | 'notification'
             //   - 'automatic' = Buffer auto-publishes via API
@@ -194,6 +192,9 @@ class BufferPublisher implements PublisherInterface
                     $schedulingType = $overrideType;
                 }
             }
+
+            // Build metadata GraphQL (needs schedulingType + overrides for stickerFields)
+            $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata, $schedulingType, $overrides, $accountId);
 
             // Notification mode requires dueAt (scheduled time) — Buffer sends
             // notification at that time. Cannot use shareNow with notification.
@@ -419,7 +420,7 @@ class BufferPublisher implements PublisherInterface
      *
      * @return string GraphQL fragment (without outer braces), or empty string
      */
-    private function buildMetadataGraphQL(string $channelService, array $tags, ?string $firstComment, array $accountMetadata): string
+    private function buildMetadataGraphQL(string $channelService, array $tags, ?string $firstComment, array $accountMetadata, string $schedulingType = 'automatic', array $overrides = [], string $accountId = ''): string
     {
         $parts = [];
 
@@ -463,8 +464,23 @@ class BufferPublisher implements PublisherInterface
         //     shouldShareToFeed: Boolean!  (REQUIRED — whether to also post to IG feed)
         //     firstComment: String         (optional — BUT requires Buffer PAID plan)
         //     link: String                 (optional)
-        //     ...
+        //     stickerFields: InstagramStickerFieldsInput  (optional — for notification publishing)
+        //     geolocation: InstagramGeolocationInput     (optional)
+        //     isAiGenerated: Boolean       (optional)
         //   }
+        //
+        // InstagramStickerFieldsInput (verified via introspection + live API test):
+        //   text: String     — Text for the Story or Reel
+        //   music: String    — Placeholder text for the post's music
+        //                      (e.g. "Add viral sound: Sephelia - Bliss")
+        //   products: String — Placeholder text for the post's linked products
+        //                      (e.g. "Tag product: Mie Jebew Special")
+        //   topics: String   — Placeholder text for the post's topics (Reels only)
+        //   other: String    — Additional field for any other post content
+        //
+        // These are REMINDER texts shown in Buffer mobile app when the notification
+        // fires — user reads them before editing in IG native app.
+        // Only works with schedulingType: notification (Notify Me mode).
         //
         // PostType enum values are LOWERCASE: post, reel, story (NOT POST/REEL/STORY)
         if ($channelService === 'instagram') {
@@ -478,6 +494,35 @@ class BufferPublisher implements PublisherInterface
                 if (!empty($firstComment)) {
                     $igParts[] = "firstComment: " . json_encode($firstComment);
                 }
+
+                // Sticker fields (music, products, topics reminders) — only when
+                // schedulingType is notification (Notify Me mode). These are reminder
+                // texts that Buffer shows in the mobile app notification, so the user
+                // knows what music/products to add when editing in IG native app.
+                // Read from account_overrides[accountId].sticker_fields
+                $stickerFields = $overrides[$accountId]['sticker_fields'] ?? null;
+                if ($schedulingType === 'notification' && $stickerFields) {
+                    $stickerParts = [];
+                    if (!empty($stickerFields['music'])) {
+                        $stickerParts[] = 'music: ' . json_encode(mb_substr($stickerFields['music'], 0, 200));
+                    }
+                    if (!empty($stickerFields['products'])) {
+                        $stickerParts[] = 'products: ' . json_encode(mb_substr($stickerFields['products'], 0, 200));
+                    }
+                    if (!empty($stickerFields['topics'])) {
+                        $stickerParts[] = 'topics: ' . json_encode(mb_substr($stickerFields['topics'], 0, 200));
+                    }
+                    if (!empty($stickerFields['text'])) {
+                        $stickerParts[] = 'text: ' . json_encode(mb_substr($stickerFields['text'], 0, 500));
+                    }
+                    if (!empty($stickerFields['other'])) {
+                        $stickerParts[] = 'other: ' . json_encode(mb_substr($stickerFields['other'], 0, 500));
+                    }
+                    if (!empty($stickerParts)) {
+                        $igParts[] = 'stickerFields: { ' . implode(', ', $stickerParts) . ' }';
+                    }
+                }
+
                 $parts[] = "instagram: { " . implode(', ', $igParts) . " }";
             }
         }
