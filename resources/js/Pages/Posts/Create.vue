@@ -738,6 +738,14 @@ const minDate = () => {
                             <!-- Buffer Pinterest board picker + title + link (inline) -->
                             <div v-if="isBufferPinterest(account) && form.account_ids.includes(account.id)"
                                 class="mt-2 ml-8 pl-3 border-l-2 border-red-200 space-y-2">
+                                <!-- Video warning: Buffer API doesn't support video, will be converted to thumbnail -->
+                                <div v-if="form.media_urls.some(isVideoUrl)"
+                                    class="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                                    ⚠️ <strong>Video tidak didukung Buffer API.</strong>
+                                    Video akan otomatis di-convert jadi thumbnail (gambar statis) untuk Pinterest.
+                                    Untuk publish video pin asli, hubungkan Pinterest langsung (bukan via Buffer)
+                                    di halaman <a href="/social-accounts" class="underline font-medium">Social Accounts</a>.
+                                </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
                                     <div v-if="loadingBoardsFor[account.id]" class="text-xs text-gray-400">Loading boards…</div>

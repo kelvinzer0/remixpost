@@ -119,30 +119,41 @@ class BufferPublisher implements PublisherInterface
                 }
             }
 
-            // Pinterest via Buffer: video pins ARE supported, but Buffer requires
-            // AT LEAST ONE IMAGE asset alongside the video asset (the image becomes
-            // the pin's cover/thumbnail, the video becomes the playable video pin).
+            // Pinterest via Buffer: VIDEO IS NOT SUPPORTED by Buffer's public API.
             //
-            // Verified via Buffer GraphQL introspection + live API test:
-            //   - AssetInput supports { video: { url, metadata: { thumbnailOffset } } }
-            //   - PinterestPostMetadataInput: { boardServiceId, title, url }
-            //   - For video pins, Buffer REQUIRES both image (cover) AND video assets
-            //     — sending video alone fails with "Pinterest posts require at least one image"
-            //   - thumbnailOffset (ms) selects which video frame becomes the cover
-            //     (Pinterest/Ig/TikTok only — per Buffer schema docs)
+            // Confirmed via Buffer's own documentation (2026-07-11):
+            //   https://developers.buffer.com/reference.html
+            //     "Note: 'video' is not supported via public API."
+            //   https://developers.buffer.com/roadmap.html
+            //     "Video uploads are not supported via the public API.
+            //      Please use image, gif, or document types."
             //
-            // Strategy for Pinterest:
-            //   - If post has video(s): for EACH video, generate a cover image via
-            //     ffmpeg (frame at ~1s) and send BOTH { image: cover } + { video: ... }
-            //   - If post has image(s) + video(s): use first image as cover for first
-            //     video, send the rest as image-only assets
-            //   - If post has image(s) only: pass through unchanged
+            // Even though the GraphQL schema accepts { video: { url } } assets
+            // (AssetInput has a video field), Buffer's publishing pipeline
+            // CANNOT process videos. Posts with video assets always fail at
+            // publish time with a misleading error like:
+            //   "Failed to send pin: Sorry we could not fetch the image."
+            //
+            // Live API tests confirmed this (2026-07-11):
+            //   - Image-only pin → ✅ SUCCESS (status: sent, pin URL returned)
+            //   - Image + video pin → ❌ FAIL (status: error, "could not fetch image")
+            //   - Video-only pin → ❌ REJECTED ("require at least one image")
+            //   - Tested with: our server thumbnail URL, Unsplash CDN image,
+            //     thumbnailOffset 0 and 1000ms — ALL video attempts failed.
+            //
+            // Workaround: convert videos to thumbnail images via ffmpeg.
+            // Pinterest gets a static image pin (not a video pin). The video
+            // content itself CANNOT be published to Pinterest via Buffer.
+            //
+            // To publish real video pins, user must connect Pinterest directly
+            // (PinterestPublisher.php supports video pins via Pinterest API v5
+            // /v5/media upload flow) — but that requires Pinterest API approval.
             if ($channelService === 'pinterest') {
-                $assetsGraphQL = $this->buildPinterestAssetsGraphQL($mediaUrls);
-            } else {
-                // Build assets array from media URLs (default path for non-Pinterest)
-                $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
+                $mediaUrls = $this->convertVideosToThumbnails($mediaUrls);
             }
+
+            // Build assets array from media URLs
+            $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
 
             $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata);
 
@@ -388,96 +399,6 @@ class BufferPublisher implements PublisherInterface
         return implode(', ', $parts);
     }
 
-    /**
-     * Build GraphQL assets array specifically for Pinterest via Buffer.
-     *
-     * Buffer's Pinterest integration accepts video pins via the AssetInput
-     * shape `{ video: { url, metadata: { thumbnailOffset } } }`, BUT it
-     * requires AT LEAST ONE image asset alongside the video (the image
-     * becomes the pin's cover, the video becomes the playable video pin).
-     *
-     * Verified working via live API test (2026-07-11):
-     *   mutation createPost with:
-     *     assets: [
-     *       { image: { url: "<cover.jpg>" } },
-     *       { video: { url: "<video.mp4>", metadata: { thumbnailOffset: 1000 } } }
-     *     ]
-     *   → returns success, Buffer sends video pin to Pinterest.
-     *
-     * Strategy:
-     *   - For each video: generate a cover image via ffmpeg (frame @ 1s)
-     *     and emit BOTH { image: cover } + { video: ... } assets
-     *   - For images: pass through unchanged
-     *   - If user attached image(s) AND video(s): use first image as cover
-     *     for the first video, extra images pass through, extra videos get
-     *     auto-generated covers
-     *
-     * @param array $mediaUrls  Original media URLs (images and/or videos)
-     * @return array            GraphQL asset input strings
-     */
-    private function buildPinterestAssetsGraphQL(array $mediaUrls): array
-    {
-        $assets = [];
-        $images = [];
-        $videos = [];
-
-        // Separate images and videos, preserving order
-        foreach ($mediaUrls as $url) {
-            $type = MediaType::fromUrl($url);
-            if ($type === 'image') {
-                $images[] = $url;
-            } elseif ($type === 'video') {
-                $videos[] = $url;
-            }
-        }
-
-        // If we have videos, pair each video with a cover image
-        // First video gets the first user-provided image (if any) as cover
-        // Remaining videos get auto-generated covers via ffmpeg
-        foreach ($videos as $idx => $videoUrl) {
-            $coverUrl = null;
-
-            // Use first user image as cover for first video
-            if ($idx === 0 && !empty($images)) {
-                $coverUrl = array_shift($images);
-            } else {
-                // Generate cover from this video
-                $coverUrl = $this->generateVideoThumbnail($videoUrl);
-                if (!$coverUrl) {
-                    Log::warning('Pinterest: failed to generate video cover, video will be sent without image cover (may fail)', [
-                        'video_url' => $videoUrl,
-                    ]);
-                    // Continue anyway — Buffer will reject, but at least we tried
-                }
-            }
-
-            // Emit cover image asset first
-            if ($coverUrl) {
-                $coverJson = json_encode($coverUrl);
-                $assets[] = "{ image: { url: {$coverJson} } }";
-            }
-
-            // Emit video asset with thumbnailOffset (1s = 1000ms)
-            $videoJson = json_encode($videoUrl);
-            $assets[] = "{ video: { url: {$videoJson}, metadata: { thumbnailOffset: 1000 } } }";
-
-            Log::info('Pinterest: prepared video pin asset pair', [
-                'video_url' => $videoUrl,
-                'cover_url' => $coverUrl,
-            ]);
-        }
-
-        // Append remaining images (those not used as covers)
-        foreach ($images as $imageUrl) {
-            $imgJson = json_encode($imageUrl);
-            $assets[] = "{ image: { url: {$imgJson} } }";
-        }
-
-        // If no videos and no images (edge case) — return empty, will fail validation
-        // but caller already validates media_urls is not empty earlier
-        return $assets;
-    }
-
     private function buildAssetsGraphQL(array $mediaUrls): array
     {
         $assets = [];
@@ -496,13 +417,27 @@ class BufferPublisher implements PublisherInterface
     }
 
     /**
-     * Convert video URLs to thumbnail image URLs (DEPRECATED — kept for
-     * backward compat in case buildPinterestAssetsGraphQL is bypassed).
+     * Convert video URLs to thumbnail image URLs (for Pinterest via Buffer).
      *
-     * This was the original (incorrect) approach that sent ONLY an image
-     * thumbnail and discarded the video. Use buildPinterestAssetsGraphQL()
-     * instead, which sends BOTH image (cover) + video asset for proper
-     * Pinterest video pins.
+     * Buffer's public API does NOT support video publishing (confirmed via
+     * official docs: "video is not supported via public API"). When a user
+     * attaches a video to publish to Pinterest via Buffer, we extract a frame
+     * from the video using ffmpeg and use that as the pin image. The video
+     * itself cannot be posted to Pinterest via Buffer — only the thumbnail.
+     *
+     * To publish real video pins, user must connect Pinterest directly
+     * (PinterestPublisher.php supports video via Pinterest API v5).
+     *
+     * Behavior:
+     *   - Image URLs: pass through unchanged
+     *   - Video URLs: generate thumbnail (1280px wide JPEG, frame at ~1s mark),
+     *     save to storage/app/public/compressed/, return public URL
+     *   - If thumbnail generation fails: log warning and SKIP that media
+     *     (sending nothing is better than sending a video URL that Buffer will
+     *      reject with "Pinterest posts require at least one image")
+     *
+     * @param array $mediaUrls  Original media URLs (mix of images/videos)
+     * @return array            Media URLs with videos replaced by thumbnails
      */
     private function convertVideosToThumbnails(array $mediaUrls): array
     {
