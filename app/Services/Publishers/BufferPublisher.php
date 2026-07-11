@@ -223,7 +223,10 @@ class BufferPublisher implements PublisherInterface
         $parts = [];
 
         // First comment — supported by FB, IG, LinkedIn
-        if ($firstComment && in_array($channelService, ['facebook', 'instagram', 'linkedin'])) {
+        // NOTE: For Instagram, firstComment is merged into the Instagram metadata
+        // block below (together with type + shouldShareToFeed) — don't add it
+        // separately here or GraphQL will see two instagram blocks.
+        if ($firstComment && in_array($channelService, ['facebook', 'linkedin'])) {
             $parts[] = "{$channelService}: { firstComment: " . json_encode($firstComment) . " }";
         }
 
