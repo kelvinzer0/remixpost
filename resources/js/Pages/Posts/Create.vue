@@ -1168,7 +1168,7 @@ const minDate = () => {
 
                         <!-- Font info -->
                         <p class="text-[10px] text-gray-500">
-                            Font: <a href="https://fonts.google.com/specimen/Raleway+Dots" target="_blank" class="text-purple-600 underline">Raleway Dots</a> (Google Fonts, OFL)
+                            Font: <a href="https://fonts.google.com/specimen/Poppins" target="_blank" class="text-purple-600 underline">Poppins Bold</a> (Google Fonts, OFL) — tebal & jelas
                         </p>
 
                         <!-- Bulk actions -->
@@ -1204,7 +1204,7 @@ const minDate = () => {
                                     <div v-if="isWatermarkApplied(url)"
                                         class="absolute pointer-events-none"
                                         :class="watermarkPositionClass(form.watermark_settings.position)">
-                                        <span class="raleway-dots block px-1 py-0.5 text-white font-bold whitespace-nowrap"
+                                        <span class="poppins-bold block px-1 py-0.5 text-white font-bold whitespace-nowrap"
                                             :style="{
                                                 fontSize: Math.max(8, form.watermark_settings.font_size / 3) + 'px',
                                                 opacity: form.watermark_settings.opacity / 100,
@@ -1226,7 +1226,7 @@ const minDate = () => {
                         </div>
 
                         <p class="text-[10px] text-gray-500 pt-2 border-t border-purple-200">
-                            Watermark diterapkan saat publish (bukan ke file asli). Font Raleway Dots, posisi & ukuran bisa diatur.
+                            Watermark diterapkan saat publish (bukan ke file asli). Font Poppins Bold, posisi & ukuran bisa diatur.
                             Video watermark memerlukan ffmpeg re-encode (lebih lambat saat publish).
                         </p>
                     </div>

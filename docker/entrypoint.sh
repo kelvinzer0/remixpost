@@ -33,12 +33,16 @@ mkdir -p storage/app/public \
          storage/logs \
          bootstrap/cache
 
-# Copy Raleway Dots font to storage/fonts/ if missing (volume mount may have empty fonts dir)
-if [ ! -f storage/fonts/RalewayDots-Regular.ttf ]; then
-    if [ -f /app/storage.defaults/fonts/RalewayDots-Regular.ttf ]; then
-        cp /app/storage.defaults/fonts/RalewayDots-Regular.ttf storage/fonts/
+# Copy Poppins fonts to storage/fonts/ if missing (volume mount may have empty fonts dir)
+# Poppins-Bold.ttf — primary watermark font (tebal, jelas)
+# Poppins-SemiBold.ttf — fallback if Bold not available
+for font in Poppins-Bold.ttf Poppins-SemiBold.ttf; do
+    if [ ! -f "storage/fonts/$font" ]; then
+        if [ -f "/app/storage.defaults/fonts/$font" ]; then
+            cp "/app/storage.defaults/fonts/$font" "storage/fonts/"
+        fi
     fi
-fi
+done
 
 chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || \
 chown -R nobody:nobody storage bootstrap/cache 2>/dev/null || true

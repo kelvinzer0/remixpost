@@ -66,20 +66,30 @@ class WatermarkService
     ];
 
     /**
-     * Path to Raleway Dots TTF (absolute, in storage/fonts/).
+     * Path to Poppins-Bold TTF (absolute, in storage/fonts/).
+     * Poppins is a geometric sans-serif — bold and clear, good for watermarks.
+     * Previously used Raleway Dots (dotted decorative font) but user found it
+     * too light/hard to read. Poppins Bold is tebal dan jelas.
+     *
+     * Font: https://fonts.google.com/specimen/Poppins (OFL license)
+     * Stored at: storage/fonts/Poppins-Bold.ttf
      * Copied to storage/app/public/fonts/ on first use for public access.
      */
     private static function fontPath(): string
     {
         // Stored in storage/fonts/ (not public — accessed server-side only)
-        $path = storage_path('fonts/RalewayDots-Regular.ttf');
+        $path = storage_path('fonts/Poppins-Bold.ttf');
         if (!file_exists($path)) {
-            // Fallback: try to find in storage/app/public/fonts/
-            $publicPath = storage_path('app/public/fonts/RalewayDots-Regular.ttf');
-            if (file_exists($publicPath)) {
-                return $publicPath;
+            // Fallback: try SemiBold
+            $path = storage_path('fonts/Poppins-SemiBold.ttf');
+            if (!file_exists($path)) {
+                // Try in storage/app/public/fonts/
+                $publicPath = storage_path('app/public/fonts/Poppins-Bold.ttf');
+                if (file_exists($publicPath)) {
+                    return $publicPath;
+                }
+                Log::warning('Watermark font not found: Poppins-Bold.ttf');
             }
-            Log::warning('Watermark font not found: RalewayDots-Regular.ttf');
         }
         return $path;
     }
