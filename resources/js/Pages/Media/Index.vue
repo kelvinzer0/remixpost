@@ -33,17 +33,31 @@ const mergePdfTargetFolder = ref('');
 const mergePdfInProgress = ref(false);
 
 // PDF ratio presets (must match backend PdfImageMerger::RATIOS)
+// cssAspect: CSS aspect-ratio value for preview (w / h)
+// dims: page dimensions in points (for display)
 const PDF_RATIOS = [
-    { value: 'a4-portrait',      label: 'A4 Portrait (1:1.41)' },
-    { value: 'a4-landscape',     label: 'A4 Landscape (1.41:1)' },
-    { value: 'letter-portrait',  label: 'Letter Portrait' },
-    { value: 'letter-landscape', label: 'Letter Landscape' },
-    { value: 'square',           label: 'Square (1:1)' },
-    { value: '16-9-landscape',   label: '16:9 Landscape' },
-    { value: '9-16-portrait',    label: '9:16 Portrait' },
-    { value: '4-3-landscape',    label: '4:3 Landscape' },
-    { value: '3-4-portrait',     label: '3:4 Portrait' },
+    { value: 'a4-portrait',      label: 'A4 Portrait (1:1.41)',      cssAspect: '595 / 842',  dims: '595 × 842 pt' },
+    { value: 'a4-landscape',     label: 'A4 Landscape (1.41:1)',     cssAspect: '842 / 595',  dims: '842 × 595 pt' },
+    { value: 'letter-portrait',  label: 'Letter Portrait',           cssAspect: '612 / 792',  dims: '612 × 792 pt' },
+    { value: 'letter-landscape', label: 'Letter Landscape',          cssAspect: '792 / 612',  dims: '792 × 612 pt' },
+    { value: 'square',           label: 'Square (1:1)',              cssAspect: '1 / 1',      dims: '700 × 700 pt' },
+    { value: '16-9-landscape',   label: '16:9 Landscape',            cssAspect: '16 / 9',     dims: '842 × 474 pt' },
+    { value: '9-16-portrait',    label: '9:16 Portrait',             cssAspect: '9 / 16',     dims: '474 × 842 pt' },
+    { value: '4-3-landscape',    label: '4:3 Landscape',             cssAspect: '4 / 3',      dims: '800 × 600 pt' },
+    { value: '3-4-portrait',     label: '3:4 Portrait',              cssAspect: '3 / 4',      dims: '600 × 800 pt' },
 ];
+
+// Preview thumbnails (max 6 shown, rest indicated as "+N more")
+const previewThumbs = computed(() => {
+    const max = 6;
+    const items = selectedItems.value.slice(0, max);
+    const remaining = selectedItems.value.length - max;
+    return { items, remaining };
+});
+
+const currentRatioInfo = computed(() => {
+    return PDF_RATIOS.find(r => r.value === mergePdfRatio.value) || PDF_RATIOS[0];
+});
 
 const formatSize = (bytes) => {
     if (!bytes) return '?';
@@ -651,7 +665,7 @@ const doMergePdf = () => {
 
         <!-- Merge to PDF modal -->
         <div v-if="showMergePdfModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" @click.self="showMergePdfModal = false">
-            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <h3 class="text-lg font-semibold mb-1">Merge {{ selectedCount }} Images to PDF</h3>
                 <p class="text-xs text-gray-500 mb-4">
                     Each image will be center-cropped to the chosen aspect ratio, then placed on its own PDF page.
@@ -667,17 +681,46 @@ const doMergePdf = () => {
                 <!-- Output folder -->
                 <label class="block text-xs font-medium text-gray-700 mb-1">Output Folder</label>
                 <select v-model="mergePdfTargetFolder"
-                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500">
+                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500 mb-4">
                     <option value="">Root</option>
                     <option v-for="f in flatFolders.filter(f => f.path)" :key="f.path" :value="f.path">{{ f.name }}</option>
                 </select>
 
-                <!-- Preview info -->
-                <div class="mt-4 p-3 bg-purple-50 border border-purple-200 rounded text-xs text-purple-800">
-                    <p class="font-medium mb-1">Preview:</p>
-                    <p>{{ selectedCount }} image{{ selectedCount > 1 ? 's' : '' }} → {{ selectedCount }} page PDF</p>
-                    <p>Ratio: {{ PDF_RATIOS.find(r => r.value === mergePdfRatio)?.label }}</p>
-                    <p>Output: {{ mergePdfTargetFolder || 'Root' }}</p>
+                <!-- Visual preview — shows how each image will be cropped to the chosen ratio -->
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-xs font-medium text-gray-700">Preview (center-cropped)</label>
+                        <span class="text-[10px] text-gray-400">{{ currentRatioInfo.dims }}</span>
+                    </div>
+                    <div class="p-3 bg-gray-50 border border-gray-200 rounded">
+                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            <div v-for="item in previewThumbs.items" :key="item.id"
+                                class="relative bg-gray-200 rounded overflow-hidden border border-gray-300"
+                                :style="{ aspectRatio: currentRatioInfo.cssAspect }">
+                                <img :src="item.url" :alt="item.original_name"
+                                    class="w-full h-full object-cover" />
+                                <!-- Page number badge -->
+                                <span class="absolute bottom-0.5 right-0.5 text-[9px] font-bold text-white bg-black/70 rounded px-1">
+                                    P{{ selectedItems.indexOf(item) + 1 }}
+                                </span>
+                            </div>
+                            <!-- +N more indicator -->
+                            <div v-if="previewThumbs.remaining > 0"
+                                class="flex items-center justify-center bg-gray-100 border border-gray-300 rounded text-xs font-medium text-gray-600"
+                                :style="{ aspectRatio: currentRatioInfo.cssAspect }">
+                                +{{ previewThumbs.remaining }} more
+                            </div>
+                        </div>
+                        <p class="mt-2 text-[10px] text-gray-500 text-center">
+                            Each image is center-cropped to {{ currentRatioInfo.label }} — edges trimmed, center preserved
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Summary -->
+                <div class="p-3 bg-purple-50 border border-purple-200 rounded text-xs text-purple-800 flex items-center justify-between">
+                    <span><strong>{{ selectedCount }}</strong> image{{ selectedCount > 1 ? 's' : '' }} → <strong>{{ selectedCount }}</strong>-page PDF</span>
+                    <span class="text-purple-600">→ {{ mergePdfTargetFolder || 'Root' }}</span>
                 </div>
 
                 <div class="flex justify-end gap-2 mt-4">
