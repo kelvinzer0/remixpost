@@ -119,37 +119,42 @@ class BufferPublisher implements PublisherInterface
                 }
             }
 
-            // Pinterest via Buffer: VIDEO IS NOT SUPPORTED by Buffer's public API.
+            // Pinterest via Buffer: VIDEO IS NOT SUPPORTED by Buffer's public API,
+            // but GIF IS supported (confirmed via Buffer docs + live API test).
             //
-            // Confirmed via Buffer's own documentation (2026-07-11):
-            //   https://developers.buffer.com/reference.html
-            //     "Note: 'video' is not supported via public API."
-            //   https://developers.buffer.com/roadmap.html
-            //     "Video uploads are not supported via the public API.
-            //      Please use image, gif, or document types."
+            // Buffer docs (https://developers.buffer.com/reference.html):
+            //   "Note: 'video' is not supported via public API."
+            //   "Please use image, gif, or document types."
             //
-            // Even though the GraphQL schema accepts { video: { url } } assets
-            // (AssetInput has a video field), Buffer's publishing pipeline
-            // CANNOT process videos. Posts with video assets always fail at
-            // publish time with a misleading error like:
-            //   "Failed to send pin: Sorry we could not fetch the image."
+            // Strategy: convert video → animated GIF via ffmpeg.
+            // Pinterest displays animated GIFs as playable animated pins
+            // (preserves motion context — unlike static JPEG thumbnails).
             //
-            // Live API tests confirmed this (2026-07-11):
-            //   - Image-only pin → ✅ SUCCESS (status: sent, pin URL returned)
-            //   - Image + video pin → ❌ FAIL (status: error, "could not fetch image")
-            //   - Video-only pin → ❌ REJECTED ("require at least one image")
-            //   - Tested with: our server thumbnail URL, Unsplash CDN image,
-            //     thumbnailOffset 0 and 1000ms — ALL video attempts failed.
+            // Live API test (2026-07-11):
+            //   - Image-only pin (JPEG) → ✅ SUCCESS
+            //   - GIF pin (1.2MB, 3s, 360px, 8fps, 128 colors) → ✅ SUCCESS
+            //     Pin URL: https://www.pinterest.com/pin/1146166174349429951
+            //     Confirmed animated GIF on Pinterest:
+            //     https://i.pinimg.com/originals/df/7c/2b/df7c2b93f4d37483d8a8b9450ec0a9f7.gif
+            //   - Video pin (any) → ❌ FAIL ("could not fetch image" / "video not supported")
+            //   - GIF too large (5.9MB, 5s, 480px, 10fps) → ❌ FAIL ("something went wrong")
             //
-            // Workaround: convert videos to thumbnail images via ffmpeg.
-            // Pinterest gets a static image pin (not a video pin). The video
-            // content itself CANNOT be published to Pinterest via Buffer.
+            // GIF generation params (verified working):
+            //   - Duration: 3 seconds (first 3s of video — captures motion context)
+            //   - Width: 360px (preserve aspect ratio, mobile-friendly)
+            //   - FPS: 8 (smooth enough for GIF, keeps file size down)
+            //   - Colors: 128 (palettegen max_colors — good quality/size balance)
+            //   - Dither: bayer bayer_scale=5 (good for photographic content)
+            //   - Output: ~1-2MB (well under Pinterest's processing limit)
             //
-            // To publish real video pins, user must connect Pinterest directly
-            // (PinterestPublisher.php supports video pins via Pinterest API v5
+            // Fallback: if GIF generation fails (e.g., video < 3s, ffmpeg error),
+            // fall back to static JPEG thumbnail (frame at 1s) — better than failing.
+            //
+            // To publish REAL video pins, user must connect Pinterest directly
+            // (PinterestPublisher.php supports video via Pinterest API v5
             // /v5/media upload flow) — but that requires Pinterest API approval.
             if ($channelService === 'pinterest') {
-                $mediaUrls = $this->convertVideosToThumbnails($mediaUrls);
+                $mediaUrls = $this->convertVideosToGifs($mediaUrls);
             }
 
             // Build assets array from media URLs
@@ -417,24 +422,76 @@ class BufferPublisher implements PublisherInterface
     }
 
     /**
-     * Convert video URLs to thumbnail image URLs (for Pinterest via Buffer).
+     * Convert video URLs to animated GIF URLs (for Pinterest via Buffer).
      *
      * Buffer's public API does NOT support video publishing (confirmed via
-     * official docs: "video is not supported via public API"). When a user
-     * attaches a video to publish to Pinterest via Buffer, we extract a frame
-     * from the video using ffmpeg and use that as the pin image. The video
-     * itself cannot be posted to Pinterest via Buffer — only the thumbnail.
+     * official docs: "video is not supported via public API"), but it DOES
+     * support GIF (Buffer docs: "Please use image, gif, or document types").
      *
-     * To publish real video pins, user must connect Pinterest directly
-     * (PinterestPublisher.php supports video via Pinterest API v5).
+     * When a user attaches a video to publish to Pinterest via Buffer, we
+     * convert the first 3 seconds of the video to an animated GIF using
+     * ffmpeg. Pinterest displays animated GIFs as playable animated pins —
+     * preserving the motion context of the original video (unlike static
+     * JPEG thumbnails which lose all motion information).
+     *
+     * Live test confirmed (2026-07-11):
+     *   - 3s, 360px, 8fps, 128 colors, 1.2MB GIF → ✅ SUCCESS on Pinterest
+     *   - Pinterest served as animated pin at i.pinimg.com/originals/.../*.gif
      *
      * Behavior:
-     *   - Image URLs: pass through unchanged
-     *   - Video URLs: generate thumbnail (1280px wide JPEG, frame at ~1s mark),
-     *     save to storage/app/public/compressed/, return public URL
-     *   - If thumbnail generation fails: log warning and SKIP that media
-     *     (sending nothing is better than sending a video URL that Buffer will
-     *      reject with "Pinterest posts require at least one image")
+     *   - Image URLs: pass through unchanged (including existing .gif files)
+     *   - Video URLs: convert to animated GIF (3s, 360px, 8fps, 128 colors)
+     *   - If GIF generation fails: fall back to static JPEG thumbnail
+     *   - If thumbnail also fails: skip media (Buffer will reject, but at
+     *     least we don't send a video URL that definitely won't work)
+     *
+     * @param array $mediaUrls  Original media URLs (mix of images/videos)
+     * @return array            Media URLs with videos replaced by GIFs
+     */
+    private function convertVideosToGifs(array $mediaUrls): array
+    {
+        $result = [];
+        foreach ($mediaUrls as $url) {
+            $type = MediaType::fromUrl($url);
+            if ($type !== 'video') {
+                $result[] = $url;
+                continue;
+            }
+
+            // Try GIF first (preserves motion context)
+            $gifUrl = $this->generateVideoGif($url);
+            if ($gifUrl) {
+                Log::info('Pinterest: generated animated GIF from video', [
+                    'video_url' => $url,
+                    'gif_url' => $gifUrl,
+                ]);
+                $result[] = $gifUrl;
+                continue;
+            }
+
+            // Fallback: static JPEG thumbnail (loses motion but at least publishes)
+            Log::warning('Pinterest: GIF generation failed, falling back to JPEG thumbnail', [
+                'video_url' => $url,
+            ]);
+            $thumbUrl = $this->generateVideoThumbnail($url);
+            if ($thumbUrl) {
+                $result[] = $thumbUrl;
+            } else {
+                Log::warning('Pinterest: thumbnail also failed, skipping media', [
+                    'video_url' => $url,
+                ]);
+                // Skip — don't add the video URL because Buffer will reject it
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Convert video URLs to thumbnail image URLs (for Pinterest via Buffer).
+     *
+     * DEPRECATED: use convertVideosToGifs() instead — GIF preserves motion
+     * context, JPEG thumbnail does not. This method is kept as fallback
+     * when GIF generation fails.
      *
      * @param array $mediaUrls  Original media URLs (mix of images/videos)
      * @return array            Media URLs with videos replaced by thumbnails
@@ -464,6 +521,140 @@ class BufferPublisher implements PublisherInterface
             }
         }
         return $result;
+    }
+
+    /**
+     * Generate an animated GIF from a video URL using ffmpeg.
+     *
+     * Strategy:
+     *   1. Resolve to local file path (or download to temp file)
+     *   2. Take first 3 seconds of video (captures motion context)
+     *   3. Scale to 360px wide, maintain aspect ratio
+     *   4. Sample at 8 fps (smooth enough for GIF, keeps size down)
+     *   5. Generate optimized 128-color palette (palettegen)
+     *   6. Apply palette with bayer dithering (good for photographic content)
+     *   7. Save as .gif in storage/app/public/compressed/
+     *   8. Return public URL
+     *
+     * Output: ~1-2MB animated GIF (well under Pinterest's processing limit)
+     *
+     * Verified working via live API test (2026-07-11):
+     *   - Pinterest accepted 1.2MB GIF, served as animated pin
+     *   - Pin URL: https://www.pinterest.com/pin/1146166174349429951
+     *   - GIF URL: https://i.pinimg.com/originals/df/7c/2b/df7c2b93f4d37483d8a8b9450ec0a9f7.gif
+     *
+     * @param string $videoUrl  URL or local path of video
+     * @return string|null      Public URL of GIF, or null on failure
+     */
+    private function generateVideoGif(string $videoUrl): ?string
+    {
+        $ffmpeg = \App\Services\MediaCompressionService::findFfmpegPublic()
+            ?? $this->findFfmpegLocal();
+        if (!$ffmpeg) {
+            Log::warning('ffmpeg not found, cannot generate video GIF');
+            return null;
+        }
+
+        // Try to resolve to local file path (avoid network download)
+        $localPath = $this->resolveLocalVideoPath($videoUrl);
+        $tempInput = null;
+
+        if (!$localPath) {
+            // Download to temp file
+            $tempInput = tempnam(sys_get_temp_dir(), 'vid_in_');
+            try {
+                $response = Http::get($videoUrl);
+                if (!$response->ok()) {
+                    Log::warning('Failed to download video for GIF', ['url' => $videoUrl]);
+                    @unlink($tempInput);
+                    return null;
+                }
+                file_put_contents($tempInput, $response->body());
+                $localPath = $tempInput;
+            } catch (\Exception $e) {
+                Log::warning('Exception downloading video for GIF: ' . $e->getMessage());
+                @unlink($tempInput);
+                return null;
+            }
+        }
+
+        // Ensure compressed directory exists
+        \Illuminate\Support\Facades\Storage::disk('public')->makeDirectory('compressed');
+
+        $filename = 'gif_' . time() . '_' . uniqid() . '.gif';
+        $outputPath = storage_path('app/public/compressed/' . $filename);
+
+        // Generate animated GIF using two-pass palette method:
+        //   1. palettegen — analyze video, generate optimal 128-color palette
+        //   2. paletteuse — apply palette with bayer dithering to final GIF
+        //
+        // Filter graph explanation:
+        //   fps=8                    — sample 8 frames per second
+        //   scale=360:-1:flags=lanczos — scale to 360px wide, auto height, lanczos resampling
+        //   split[s0][s1]            — split into 2 streams (one for palette, one for output)
+        //   [s0]palettegen=max_colors=128[p]  — generate 128-color palette from stream 0
+        //   [s1][p]paletteuse=dither=bayer:bayer_scale=5  — apply palette to stream 1
+        //
+        // -t 3 limits output to 3 seconds (after scaling, before split)
+        // -loop 0 makes GIF loop infinitely
+        // -gifflags -offsetting disables per-frame offset optimization (smaller files)
+        $filter = "fps=8,scale=360:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5";
+        $cmd = sprintf(
+            '%s -t 3 -i %s -lavfi "%s" -loop 0 -gifflags -offsetting -y %s 2>&1',
+            escapeshellarg($ffmpeg),
+            escapeshellarg($localPath),
+            $filter,
+            escapeshellarg($outputPath)
+        );
+
+        $output = shell_exec($cmd);
+
+        // Cleanup temp input if we downloaded it
+        if ($tempInput) {
+            @unlink($tempInput);
+        }
+
+        if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+            Log::warning('ffmpeg GIF generation failed', [
+                'video_url' => $videoUrl,
+                'ffmpeg_output' => substr($output ?? '', -500),
+            ]);
+            return null;
+        }
+
+        $gifSize = filesize($outputPath);
+
+        // If GIF is too large (>4MB), try regenerating with more aggressive settings
+        // (Pinterest processing fails on very large GIFs — tested 5.9MB failed)
+        if ($gifSize > 4 * 1024 * 1024) {
+            Log::info('GIF too large, regenerating with smaller dimensions', [
+                'original_size_mb' => round($gifSize / 1024 / 1024, 2),
+            ]);
+            @unlink($outputPath);
+
+            // Try with 240px width and 6 fps
+            $filterSmaller = "fps=6,scale=240:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=96[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5";
+            $cmdSmaller = sprintf(
+                '%s -t 3 -i %s -lavfi "%s" -loop 0 -gifflags -offsetting -y %s 2>&1',
+                escapeshellarg($ffmpeg),
+                escapeshellarg($localPath),
+                $filterSmaller,
+                escapeshellarg($outputPath)
+            );
+            shell_exec($cmdSmaller);
+
+            if (!file_exists($outputPath) || filesize($outputPath) === 0) {
+                Log::warning('ffmpeg GIF regeneration (smaller) also failed');
+                return null;
+            }
+
+            $gifSize = filesize($outputPath);
+            Log::info('GIF regenerated at smaller size', [
+                'new_size_mb' => round($gifSize / 1024 / 1024, 2),
+            ]);
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('public')->url('compressed/' . $filename);
     }
 
     /**

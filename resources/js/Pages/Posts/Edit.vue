@@ -540,13 +540,15 @@ const supportsTags = computed(() => {
                             <!-- Buffer Pinterest board + title + link (inline) -->
                             <div v-if="isBufferPinterest(account) && form.account_ids.includes(account.id)"
                                 class="mt-2 ml-8 pl-3 border-l-2 border-red-200 space-y-2">
-                                <!-- Video warning: Buffer API doesn't support video, will be converted to thumbnail -->
+                                <!-- Video → GIF info: Buffer API doesn't support video, will auto-convert to animated GIF -->
                                 <div v-if="form.media_urls.some(isVideoUrl)"
-                                    class="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                                    ⚠️ <strong>Video tidak didukung Buffer API.</strong>
-                                    Video akan otomatis di-convert jadi thumbnail (gambar statis) untuk Pinterest.
-                                    Untuk publish video pin asli, hubungkan Pinterest langsung (bukan via Buffer)
-                                    di halaman <a href="/social-accounts" class="underline font-medium">Social Accounts</a>.
+                                    class="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                                    ℹ️ <strong>Video akan di-convert ke GIF animasi.</strong>
+                                    Buffer API tidak support video, jadi video otomatis di-convert jadi
+                                    GIF animasi (3 detik pertama) untuk Pinterest. Pin akan tampil
+                                    sebagai animated GIF yang playable, bukan static image.
+                                    Untuk publish video pin asli (full duration), hubungkan Pinterest
+                                    langsung di <a href="/social-accounts" class="underline font-medium">Social Accounts</a>.
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">📌 Pinterest Board</label>
