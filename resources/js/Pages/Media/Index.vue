@@ -26,6 +26,25 @@ const showBulkMoveModal = ref(false);
 const bulkMoveTargetFolder = ref('');
 const bulkActionInProgress = ref(false);
 
+// Merge to PDF state
+const showMergePdfModal = ref(false);
+const mergePdfRatio = ref('a4-portrait');
+const mergePdfTargetFolder = ref('');
+const mergePdfInProgress = ref(false);
+
+// PDF ratio presets (must match backend PdfImageMerger::RATIOS)
+const PDF_RATIOS = [
+    { value: 'a4-portrait',      label: 'A4 Portrait (1:1.41)' },
+    { value: 'a4-landscape',     label: 'A4 Landscape (1.41:1)' },
+    { value: 'letter-portrait',  label: 'Letter Portrait' },
+    { value: 'letter-landscape', label: 'Letter Landscape' },
+    { value: 'square',           label: 'Square (1:1)' },
+    { value: '16-9-landscape',   label: '16:9 Landscape' },
+    { value: '9-16-portrait',    label: '9:16 Portrait' },
+    { value: '4-3-landscape',    label: '4:3 Landscape' },
+    { value: '3-4-portrait',     label: '3:4 Portrait' },
+];
+
 const formatSize = (bytes) => {
     if (!bytes) return '?';
     if (bytes < 1024) return bytes + ' B';
@@ -274,6 +293,41 @@ const doBulkDelete = () => {
         },
     });
 };
+
+// ===== Merge to PDF =====
+
+// Only enable Merge to PDF when ALL selected items are images
+const allSelectedAreImages = computed(() => {
+    if (selectedIds.value.size === 0) return false;
+    return selectedItems.value.every(item => isImage(item.mime_type));
+});
+
+const openMergePdfModal = () => {
+    if (!allSelectedAreImages.value) return;
+    mergePdfRatio.value = 'a4-portrait';
+    mergePdfTargetFolder.value = props.currentFolder || '';
+    showMergePdfModal.value = true;
+};
+
+const doMergePdf = () => {
+    if (!allSelectedAreImages.value) return;
+    mergePdfInProgress.value = true;
+    useForm({
+        ids: Array.from(selectedIds.value),
+        ratio: mergePdfRatio.value,
+        folder_path: mergePdfTargetFolder.value,
+    }).post('/media/bulk/merge-pdf', {
+        onSuccess: () => {
+            showMergePdfModal.value = false;
+            selectedIds.value = new Set();
+            selectMode.value = false;
+            mergePdfInProgress.value = false;
+        },
+        onError: () => {
+            mergePdfInProgress.value = false;
+        },
+    });
+};
 </script>
 
 <template>
@@ -426,6 +480,15 @@ const doBulkDelete = () => {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
                                 </svg>
                                 Copy URLs
+                            </button>
+                            <button @click="openMergePdfModal" :disabled="!allSelectedAreImages"
+                                :title="!allSelectedAreImages ? 'All selected items must be images to merge to PDF' : 'Merge selected images into a PDF'"
+                                class="px-3 py-1.5 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-6 4h4m2-12v4h4"/>
+                                </svg>
+                                Merge to PDF
                             </button>
                             <button @click="openBulkMoveModal" :disabled="selectedCount === 0"
                                 class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
@@ -581,6 +644,52 @@ const doBulkDelete = () => {
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                         </svg>
                         {{ bulkActionInProgress ? 'Moving...' : 'Move' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Merge to PDF modal -->
+        <div v-if="showMergePdfModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" @click.self="showMergePdfModal = false">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                <h3 class="text-lg font-semibold mb-1">Merge {{ selectedCount }} Images to PDF</h3>
+                <p class="text-xs text-gray-500 mb-4">
+                    Each image will be center-cropped to the chosen aspect ratio, then placed on its own PDF page.
+                </p>
+
+                <!-- Ratio selection -->
+                <label class="block text-xs font-medium text-gray-700 mb-1">Page Size / Aspect Ratio</label>
+                <select v-model="mergePdfRatio"
+                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500 mb-4">
+                    <option v-for="r in PDF_RATIOS" :key="r.value" :value="r.value">{{ r.label }}</option>
+                </select>
+
+                <!-- Output folder -->
+                <label class="block text-xs font-medium text-gray-700 mb-1">Output Folder</label>
+                <select v-model="mergePdfTargetFolder"
+                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500">
+                    <option value="">Root</option>
+                    <option v-for="f in flatFolders.filter(f => f.path)" :key="f.path" :value="f.path">{{ f.name }}</option>
+                </select>
+
+                <!-- Preview info -->
+                <div class="mt-4 p-3 bg-purple-50 border border-purple-200 rounded text-xs text-purple-800">
+                    <p class="font-medium mb-1">Preview:</p>
+                    <p>{{ selectedCount }} image{{ selectedCount > 1 ? 's' : '' }} → {{ selectedCount }} page PDF</p>
+                    <p>Ratio: {{ PDF_RATIOS.find(r => r.value === mergePdfRatio)?.label }}</p>
+                    <p>Output: {{ mergePdfTargetFolder || 'Root' }}</p>
+                </div>
+
+                <div class="flex justify-end gap-2 mt-4">
+                    <button @click="showMergePdfModal = false" :disabled="mergePdfInProgress"
+                        class="px-3 py-1.5 text-sm text-gray-600 disabled:opacity-50">Cancel</button>
+                    <button @click="doMergePdf" :disabled="mergePdfInProgress"
+                        class="px-3 py-1.5 text-sm text-white bg-purple-600 hover:bg-purple-700 rounded disabled:opacity-50 flex items-center gap-2">
+                        <svg v-if="mergePdfInProgress" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        {{ mergePdfInProgress ? 'Merging...' : 'Generate PDF' }}
                     </button>
                 </div>
             </div>

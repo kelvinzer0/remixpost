@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Media;
+use App\Services\MediaType;
+use App\Services\PdfImageMerger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
@@ -232,6 +235,104 @@ class MediaController extends Controller
         }
 
         return back()->with('message', "{$deleted} media deleted.");
+    }
+
+    /**
+     * Merge multiple image media items into a single PDF.
+     *
+     * Each image is center-cropped to the chosen aspect ratio, then placed
+     * on its own PDF page. The resulting PDF is saved as a new Media item
+     * in the user-selected output folder.
+     *
+     * Body: { ids: [1,2,3,...], ratio: "a4-portrait", folder_path: "target" }
+     *
+     * All selected items MUST be images (PNG/JPEG/GIF/WebP/BMP).
+     * If any non-image is in the selection, the request is rejected.
+     */
+    public function bulkMergePdf(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1|max:500',
+            'ids.*' => 'required|integer',
+            'ratio' => 'required|string|in:' . implode(',', array_keys(PdfImageMerger::RATIOS)),
+            'folder_path' => 'nullable|string|max:500',
+        ]);
+
+        // Fetch all selected media owned by user
+        $mediaItems = Media::where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->orderBy('created_at', 'desc') // newest first (matches grid display order)
+            ->get(['id', 'original_name', 'mime_type', 'path', 'url']);
+
+        if ($mediaItems->isEmpty()) {
+            return back()->with('error', 'No valid media found.');
+        }
+
+        // Validate ALL items are images
+        foreach ($mediaItems as $media) {
+            if (MediaType::fromMime($media->mime_type) !== 'image') {
+                return back()->with('error', "All selected items must be images. '{$media->original_name}' is not an image ({$media->mime_type}).");
+            }
+        }
+
+        // Collect local file paths for each image
+        $imagePaths = [];
+        foreach ($mediaItems as $media) {
+            $localPath = storage_path('app/public/' . $media->path);
+            // path is stored as "uploads/xxx.jpg" relative to public disk
+            // storage_path('app/public/') + path = full local path
+            if (!file_exists($localPath)) {
+                // Try without 'public/' prefix (path might already include it)
+                $altPath = storage_path('app/' . $media->path);
+                if (file_exists($altPath)) {
+                    $localPath = $altPath;
+                } else {
+                    return back()->with('error', "File not found on disk: {$media->original_name}");
+                }
+            }
+            $imagePaths[] = $localPath;
+        }
+
+        // Generate PDF
+        $pdfFilename = 'merged_' . time() . '_' . uniqid() . '.pdf';
+        $pdfPath = 'uploads/' . $pdfFilename;
+        $pdfLocalPath = storage_path('app/public/' . $pdfPath);
+
+        // Ensure uploads directory exists
+        Storage::disk('public')->makeDirectory('uploads');
+
+        $success = PdfImageMerger::generate(
+            $imagePaths,
+            $validated['ratio'],
+            $pdfLocalPath
+        );
+
+        if (!$success) {
+            return back()->with('error', 'Failed to generate PDF. Check that all selected files are valid images.');
+        }
+
+        // Determine output folder
+        $folderPath = $validated['folder_path'] ?? '';
+        if ($folderPath) {
+            $folderPath = trim($folderPath, '/');
+        }
+
+        // Create Media record for the generated PDF
+        $pdfSize = filesize($pdfLocalPath);
+        $media = $request->user()->media()->create([
+            'filename' => $pdfFilename,
+            'original_name' => 'merged-' . count($imagePaths) . '-images-' . $validated['ratio'] . '.pdf',
+            'mime_type' => 'application/pdf',
+            'size' => $pdfSize,
+            'path' => $pdfPath,
+            'url' => Storage::disk('public')->url($pdfPath),
+            'folder_path' => $folderPath ?: null,
+        ]);
+
+        $ratioLabel = PdfImageMerger::RATIOS[$validated['ratio']]['label'];
+        $targetFolder = $folderPath ?: 'Root';
+
+        return back()->with('message', "PDF created from " . count($imagePaths) . " images ({$ratioLabel}). Saved to {$targetFolder}.");
     }
 
     /**

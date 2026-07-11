@@ -82,6 +82,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/media/folder/delete', [\App\Http\Controllers\MediaController::class, 'deleteFolder'])->name('media.folder.delete');
     Route::post('/media/bulk/move', [\App\Http\Controllers\MediaController::class, 'bulkMove'])->name('media.bulk.move');
     Route::post('/media/bulk/delete', [\App\Http\Controllers\MediaController::class, 'bulkDelete'])->name('media.bulk.delete');
+    Route::post('/media/bulk/merge-pdf', [\App\Http\Controllers\MediaController::class, 'bulkMergePdf'])->name('media.bulk.merge-pdf');
     // {id} routes — constrained to numeric to prevent matching 'bulk', 'folder', etc.
     Route::post('/media/{id}/move', [\App\Http\Controllers\MediaController::class, 'move'])
         ->whereNumber('id')->name('media.move');
