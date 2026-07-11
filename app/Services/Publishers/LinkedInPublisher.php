@@ -102,6 +102,12 @@ class LinkedInPublisher implements PublisherInterface
 
             // Handle media — LinkedIn only allows one media category per post.
             // Priority: documents > videos > images (docs are rarer + most specific)
+            //
+            // CRITICAL: each media object MUST include a "category" field
+            // (DOCUMENT, VIDEO, IMAGE) — omitting it causes 400 error:
+            //   "media type validation failed for category"
+            // LinkedIn Posts API 2024+ requires this field per the docs:
+            // https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api
             if (!empty($documentUrls)) {
                 // PDF document post — LinkedIn renders PDFs as a swipeable
                 // carousel of pages (1:1 aspect ratio per page).
@@ -114,7 +120,12 @@ class LinkedInPublisher implements PublisherInterface
                         'error' => 'LinkedIn document upload failed: ' . $result['error'],
                     ];
                 }
-                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
+                $postPayload['content'] = [
+                    'media' => [
+                        'id' => $result['assetUrn'],
+                        'category' => 'DOCUMENT',
+                    ],
+                ];
             } elseif (!empty($videoUrls)) {
                 // Video post — single video only (LinkedIn limitation)
                 $url = $videoUrls[0];
@@ -125,7 +136,12 @@ class LinkedInPublisher implements PublisherInterface
                         'error' => 'LinkedIn video upload failed: ' . $result['error'],
                     ];
                 }
-                $postPayload['content'] = ['media' => ['id' => $result['assetUrn']]];
+                $postPayload['content'] = [
+                    'media' => [
+                        'id' => $result['assetUrn'],
+                        'category' => 'VIDEO',
+                    ],
+                ];
             } elseif (!empty($imageUrls)) {
                 $mediaIds = [];
                 foreach ($imageUrls as $url) {
@@ -136,10 +152,20 @@ class LinkedInPublisher implements PublisherInterface
                 }
                 if (!empty($mediaIds)) {
                     if (count($mediaIds) === 1) {
-                        $postPayload['content'] = ['media' => ['id' => $mediaIds[0]]];
+                        $postPayload['content'] = [
+                            'media' => [
+                                'id' => $mediaIds[0],
+                                'category' => 'IMAGE',
+                            ],
+                        ];
                     } else {
                         $postPayload['content'] = [
-                            'multiImage' => ['images' => array_map(fn($id) => ['id' => $id], $mediaIds)],
+                            'multiImage' => [
+                                'images' => array_map(
+                                    fn($id) => ['id' => $id],
+                                    $mediaIds
+                                ),
+                            ],
                         ];
                     }
                 }
