@@ -583,12 +583,14 @@ const supportsTags = computed(() => {
                                             class="text-pink-500 focus:ring-pink-400" />
                                         <span class="text-xs text-gray-700">Feed Post</span>
                                     </label>
-                                    <label class="inline-flex items-center gap-1 cursor-pointer">
+                                    <label class="inline-flex items-center gap-1" :class="!form.media_urls.some(isVideoUrl) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'">
                                         <input type="radio" :name="'ig-edit-' + account.id"
                                             :checked="form.account_overrides[account.id]?.instagram_post_type === 'reel'"
-                                            @change="setOverride(account.id, 'instagram_post_type', 'reel')"
+                                            @change="form.media_urls.some(isVideoUrl) ? setOverride(account.id, 'instagram_post_type', 'reel') : null"
+                                            :disabled="!form.media_urls.some(isVideoUrl)"
                                             class="text-pink-500 focus:ring-pink-400" />
                                         <span class="text-xs text-gray-700">Reel</span>
+                                        <span v-if="!form.media_urls.some(isVideoUrl)" class="text-[9px] text-red-500">⚠ butuh video</span>
                                     </label>
                                     <label class="inline-flex items-center gap-1 cursor-pointer">
                                         <input type="radio" :name="'ig-edit-' + account.id"
