@@ -42,6 +42,19 @@ class PostController extends Controller
             ->take(50)
             ->get(['id', 'url', 'original_name', 'mime_type', 'folder_path']);
 
+        // Append dimensions + aspect ratio label for image/video items
+        // so the media picker in Create Post can show aspect ratio badges
+        $media->each(function ($item) {
+            $localPath = storage_path('app/public/' . parse_url($item->url, PHP_URL_PATH));
+            // Extract relative path from URL (after /storage/)
+            if (preg_match('#/storage/(.+)$#', $item->url, $m)) {
+                $localPath = storage_path('app/public/' . $m[1]);
+            }
+            $dims = \App\Services\MediaType::getDimensions($localPath, $item->mime_type);
+            $item->dimensions = $dims;
+            $item->aspect_ratio = $dims ? \App\Services\MediaType::aspectRatioLabel($dims['w'], $dims['h']) : null;
+        });
+
         return Inertia::render('Posts/Create', [
             'accounts' => $accounts,
             'media' => $media,
@@ -154,6 +167,17 @@ class PostController extends Controller
             ->orderBy('created_at', 'desc')
             ->take(50)
             ->get(['id', 'url', 'original_name', 'mime_type', 'folder_path']);
+
+        // Append dimensions + aspect ratio label for image/video items
+        $media->each(function ($item) {
+            $localPath = storage_path('app/public/' . parse_url($item->url, PHP_URL_PATH));
+            if (preg_match('#/storage/(.+)$#', $item->url, $m)) {
+                $localPath = storage_path('app/public/' . $m[1]);
+            }
+            $dims = \App\Services\MediaType::getDimensions($localPath, $item->mime_type);
+            $item->dimensions = $dims;
+            $item->aspect_ratio = $dims ? \App\Services\MediaType::aspectRatioLabel($dims['w'], $dims['h']) : null;
+        });
 
         return Inertia::render('Posts/Edit', [
             'post' => $post,

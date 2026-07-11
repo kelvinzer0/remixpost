@@ -1237,7 +1237,7 @@ const minDate = () => {
                                 <button v-for="item in filteredPickerMedia" :key="item.id"
                                     type="button"
                                     @click="selectMedia(item.url)"
-                                    class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
+                                    class="relative border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
                                     <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
                                     <div v-else-if="isVideoMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-gray-900">
                                         <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
@@ -1251,6 +1251,12 @@ const minDate = () => {
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                         </svg>
                                     </div>
+                                    <!-- Aspect ratio badge (top-right) — only for image/video -->
+                                    <span v-if="item.aspect_ratio"
+                                        class="absolute top-0.5 right-0.5 px-1 py-0.5 text-[8px] font-semibold text-white bg-black/70 rounded"
+                                        :title="item.dimensions ? `${item.dimensions.w} × ${item.dimensions.h}px` : ''">
+                                        {{ item.aspect_ratio }}
+                                    </span>
                                     <p class="text-xs text-gray-500 truncate px-1">{{ item.original_name }}</p>
                                 </button>
                             </div>

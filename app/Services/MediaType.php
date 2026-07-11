@@ -124,4 +124,115 @@ class MediaType
         }
         return $result;
     }
+
+    /**
+     * Get pixel dimensions {w, h} for a media file.
+     * Returns null for non-image/video types or on failure.
+     *
+     * Image: uses PHP getimagesize() (fast, no external deps)
+     * Video: uses ffprobe (already installed in container)
+     *
+     * @param string $path     Absolute local file path
+     * @param string|null $mime MIME type (optional, auto-detected if not provided)
+     * @return array|null      {w: int, h: int} or null
+     */
+    public static function getDimensions(string $path, ?string $mime = null): ?array
+    {
+        if (!file_exists($path)) {
+            return null;
+        }
+
+        if (!$mime) {
+            $mime = mime_content_type($path);
+        }
+
+        // Image — getimagesize() supports jpeg/png/gif/webp/bmp
+        if (str_starts_with($mime, 'image/')) {
+            $info = @getimagesize($path);
+            if ($info && isset($info[0], $info[1])) {
+                return ['w' => (int) $info[0], 'h' => (int) $info[1]];
+            }
+            return null;
+        }
+
+        // Video — use ffprobe
+        if (str_starts_with($mime, 'video/')) {
+            $ffprobe = trim((string) shell_exec('which ffprobe 2>/dev/null') ?? '');
+            if (!$ffprobe || !file_exists($ffprobe)) {
+                return null;
+            }
+            $cmd = sprintf(
+                '%s -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 %s 2>/dev/null',
+                escapeshellarg($ffprobe),
+                escapeshellarg($path)
+            );
+            $output = trim((string) shell_exec($cmd) ?? '');
+            if ($output && str_contains($output, ',')) {
+                [$w, $h] = explode(',', $output, 2);
+                $w = (int) trim($w);
+                $h = (int) trim($h);
+                if ($w > 0 && $h > 0) {
+                    return ['w' => $w, 'h' => $h];
+                }
+            }
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Compute a human-readable aspect ratio label from width + height.
+     *
+     * Returns common ratios as their standard labels:
+     *   1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 21:9, 5:4, 4:5
+     * Falls back to GCD-based simplification or decimal ratio.
+     *
+     * @param int $w  Width in pixels
+     * @param int $h  Height in pixels
+     * @return string|null  Label like "16:9" or null if invalid
+     */
+    public static function aspectRatioLabel(int $w, int $h): ?string
+    {
+        if ($w <= 0 || $h <= 0) return null;
+
+        $ratio = $w / $h;
+        $common = [
+            '1:1'   => 1.0,
+            '16:9'  => 16 / 9,
+            '9:16'  => 9 / 16,
+            '4:3'   => 4 / 3,
+            '3:4'   => 3 / 4,
+            '3:2'   => 3 / 2,
+            '2:3'   => 2 / 3,
+            '21:9'  => 21 / 9,
+            '5:4'   => 5 / 4,
+            '4:5'   => 4 / 5,
+            '2:1'   => 2 / 1,
+            '1:2'   => 1 / 2,
+        ];
+
+        foreach ($common as $label => $target) {
+            if (abs($ratio - $target) / $target < 0.02) {
+                return $label;
+            }
+        }
+
+        // Fallback: GCD-based simplification
+        $gcd = function ($a, $b) {
+            while ($b != 0) {
+                [$a, $b] = [$b, $a % $b];
+            }
+            return $a;
+        };
+        $g = $gcd($w, $h);
+        $sw = $w / $g;
+        $sh = $h / $g;
+
+        if ($sw > 50 || $sh > 50) {
+            return number_format($ratio, 1) . ':1';
+        }
+
+        return "{$sw}:{$sh}";
+    }
 }
