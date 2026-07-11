@@ -65,6 +65,12 @@ WORKDIR /app
 # Copy app from build stage (with vendor + public/build already built)
 COPY --from=build /app /app
 
+# Copy default storage files (fonts, etc.) to /app/storage.defaults/
+# These are copied to /app/storage/ at container startup by entrypoint.sh
+# (because /app/storage is a Docker volume, the image's contents are shadowed
+# by the volume — we keep defaults separately and copy them in at runtime)
+COPY storage/fonts /app/storage.defaults/fonts
+
 # Copy configs
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisord.conf /etc/supervisord.conf

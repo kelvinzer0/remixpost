@@ -18,6 +18,14 @@ const existingOverrides = props.post.account_overrides || {};
 const form = useForm({
     content: props.post.content,
     media_urls: props.post.media_urls || [],
+    watermark_settings: props.post.watermark_settings || {
+        enabled: false,
+        text: '@warunglakku',
+        position: 'bottom-right',
+        font_size: 24,
+        opacity: 60,
+        applied_to: [],
+    },
     tags: props.post.tags || [],
     tagInput: '',
     first_comment: props.post.first_comment || '',
@@ -28,6 +36,71 @@ const form = useForm({
         ? new Date(props.post.scheduled_at).toISOString().slice(0, 16)
         : '',
 });
+
+// ===== Watermark =====
+const WATERMARK_POSITIONS = [
+    { value: 'top-left', label: '↖ Top Left' },
+    { value: 'top-center', label: '↑ Top Center' },
+    { value: 'top-right', label: '↗ Top Right' },
+    { value: 'middle-left', label: '← Middle Left' },
+    { value: 'middle-center', label: '● Middle Center' },
+    { value: 'middle-right', label: '→ Middle Right' },
+    { value: 'bottom-left', label: '↙ Bottom Left' },
+    { value: 'bottom-center', label: '↓ Bottom Center' },
+    { value: 'bottom-right', label: '↘ Bottom Right' },
+];
+
+const watermarkableMedia = computed(() => {
+    return form.media_urls.filter(url => isImageUrl(url) || isVideoUrl(url));
+});
+
+const isWatermarkApplied = (url) => {
+    return (form.watermark_settings.applied_to || []).includes(url);
+};
+
+const toggleWatermarkApplied = (url) => {
+    if (!form.watermark_settings.applied_to) {
+        form.watermark_settings.applied_to = [];
+    }
+    const idx = form.watermark_settings.applied_to.indexOf(url);
+    if (idx >= 0) {
+        form.watermark_settings.applied_to.splice(idx, 1);
+    } else {
+        form.watermark_settings.applied_to.push(url);
+    }
+};
+
+const applyWatermarkToAll = () => {
+    form.watermark_settings.applied_to = [...watermarkableMedia.value];
+};
+
+const clearWatermarkApplied = () => {
+    form.watermark_settings.applied_to = [];
+};
+
+watch(() => form.media_urls, (newUrls) => {
+    if (!form.watermark_settings.applied_to) return;
+    form.watermark_settings.applied_to = form.watermark_settings.applied_to.filter(
+        url => newUrls.includes(url)
+    );
+}, { deep: true });
+
+const watermarkPositionClass = (position) => {
+    const map = {
+        'top-left': 'top-2 left-2',
+        'top-center': 'top-2 left-1/2 -translate-x-1/2',
+        'top-right': 'top-2 right-2',
+        'middle-left': 'top-1/2 left-2 -translate-y-1/2',
+        'middle-center': 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+        'middle-right': 'top-1/2 right-2 -translate-y-1/2',
+        'bottom-left': 'bottom-2 left-2',
+        'bottom-center': 'bottom-2 left-1/2 -translate-x-1/2',
+        'bottom-right': 'bottom-2 right-2',
+    };
+    return map[position] || map['bottom-right'];
+};
+
+const showWatermarkPanel = ref(false);
 
 // ===== Buffer per-account overrides (Pinterest board + IG mode) =====
 const bufferBoards = ref({}); // { accountId: [{ serviceId, name }] }
@@ -358,6 +431,13 @@ const submit = () => {
     if (autoSaveTimer.value) clearTimeout(autoSaveTimer.value);
     const data = form.data();
     delete data.tagInput;
+    // Set watermark enabled flag based on applied_to content
+    if (data.watermark_settings) {
+        data.watermark_settings.enabled = (data.watermark_settings.applied_to || []).length > 0;
+        if (!data.watermark_settings.enabled) {
+            delete data.watermark_settings;
+        }
+    }
     // Clean up empty overrides
     if (data.account_overrides) {
         Object.keys(data.account_overrides).forEach(key => {
@@ -825,6 +905,117 @@ const supportsTags = computed(() => {
                         </div>
                     </div>
                     <p class="mt-1 text-xs text-gray-500">Upload media in the <Link href="/media" class="text-brand-600">Media Manager</Link>, then select here. Klik × untuk hapus attachment.</p>
+                </div>
+
+                <!-- Watermark Protection -->
+                <div v-if="watermarkableMedia.length > 0">
+                    <button type="button" @click="showWatermarkPanel = !showWatermarkPanel"
+                        class="flex items-center justify-between w-full text-sm font-medium text-gray-700">
+                        <span class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                            Watermark Protection
+                            <span v-if="(form.watermark_settings.applied_to || []).length > 0"
+                                class="text-xs font-normal text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">
+                                {{ (form.watermark_settings.applied_to || []).length }} protected
+                            </span>
+                        </span>
+                        <svg class="w-4 h-4 transition-transform" :class="showWatermarkPanel ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+
+                    <div v-if="showWatermarkPanel" class="mt-3 p-4 bg-purple-50/50 border border-purple-200 rounded-md space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Watermark Text</label>
+                                <input v-model="form.watermark_settings.text" type="text" maxlength="100"
+                                    placeholder="@username atau nama brand"
+                                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Position</label>
+                                <select v-model="form.watermark_settings.position"
+                                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-purple-500 focus:ring-purple-500">
+                                    <option v-for="p in WATERMARK_POSITIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">
+                                    Font Size: <span class="text-purple-700">{{ form.watermark_settings.font_size }}pt</span>
+                                </label>
+                                <input v-model.number="form.watermark_settings.font_size" type="range" min="8" max="120" step="2"
+                                    class="block w-full accent-purple-600" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">
+                                    Opacity: <span class="text-purple-700">{{ form.watermark_settings.opacity }}%</span>
+                                </label>
+                                <input v-model.number="form.watermark_settings.opacity" type="range" min="10" max="100" step="5"
+                                    class="block w-full accent-purple-600" />
+                            </div>
+                        </div>
+
+                        <p class="text-[10px] text-gray-500">
+                            Font: <a href="https://fonts.google.com/specimen/Raleway+Dots" target="_blank" class="text-purple-600 underline">Raleway Dots</a> (Google Fonts, OFL)
+                        </p>
+
+                        <div class="flex items-center gap-2 pt-2 border-t border-purple-200">
+                            <button type="button" @click="applyWatermarkToAll"
+                                class="px-2 py-1 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 rounded">
+                                Protect All
+                            </button>
+                            <button type="button" @click="clearWatermarkApplied"
+                                class="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded">
+                                Clear All
+                            </button>
+                            <span class="text-xs text-gray-500">
+                                {{ (form.watermark_settings.applied_to || []).length }} / {{ watermarkableMedia.length }} media protected
+                            </span>
+                        </div>
+
+                        <div class="space-y-2 pt-2 border-t border-purple-200">
+                            <p class="text-xs font-medium text-gray-700">Per-Media Watermark:</p>
+                            <div v-for="url in watermarkableMedia" :key="url"
+                                class="flex items-center gap-3 p-2 bg-white rounded border border-gray-200">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="isWatermarkApplied(url)"
+                                        @change="toggleWatermarkApplied(url)"
+                                        class="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
+                                </label>
+                                <div class="relative w-20 h-20 rounded overflow-hidden border border-gray-200 bg-gray-100 flex-shrink-0">
+                                    <img v-if="isImageUrl(url)" :src="url" class="w-full h-full object-cover" />
+                                    <video v-else-if="isVideoUrl(url)" :src="url" class="w-full h-full object-cover" muted />
+                                    <div v-if="isWatermarkApplied(url)"
+                                        class="absolute pointer-events-none"
+                                        :class="watermarkPositionClass(form.watermark_settings.position)">
+                                        <span class="raleway-dots block px-1 py-0.5 text-white font-bold whitespace-nowrap"
+                                            :style="{
+                                                fontSize: Math.max(8, form.watermark_settings.font_size / 3) + 'px',
+                                                opacity: form.watermark_settings.opacity / 100,
+                                                textShadow: '1px 1px 2px rgba(0,0,0,0.8)'
+                                            }">
+                                            {{ form.watermark_settings.text }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-medium text-gray-900 truncate">{{ url.split('/').pop() }}</p>
+                                    <p class="text-[10px] text-gray-500">
+                                        {{ isImageUrl(url) ? 'Image' : 'Video' }}
+                                        <span v-if="isWatermarkApplied(url)" class="text-purple-700">· ✓ Protected</span>
+                                        <span v-else class="text-gray-400">· Not protected</span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p class="text-[10px] text-gray-500 pt-2 border-t border-purple-200">
+                            Watermark diterapkan saat publish (bukan ke file asli). Font Raleway Dots, posisi & ukuran bisa diatur.
+                            Video watermark memerlukan ffmpeg re-encode (lebih lambat saat publish).
+                        </p>
+                    </div>
                 </div>
 
                 <!-- Tags -->

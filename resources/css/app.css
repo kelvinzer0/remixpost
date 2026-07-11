@@ -3,3 +3,10 @@
 @tailwind forms;
 @tailwind typography;
 @tailwind utilities;
+
+/* Raleway Dots font for watermark preview text
+   Loaded via Google Fonts in app.blade.php
+   Applied to .raleway-dots class in Create/Edit Post watermark preview */
+.raleway-dots {
+    font-family: 'Raleway Dots', cursive;
+}

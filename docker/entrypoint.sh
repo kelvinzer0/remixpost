@@ -23,11 +23,23 @@ fi
 # Ensure storage directories exist with correct permissions
 echo "==> Setting storage permissions..."
 mkdir -p storage/app/public \
+         storage/app/public/compressed \
+         storage/app/public/watermarked \
+         storage/app/public/uploads \
+         storage/fonts \
          storage/framework/cache \
          storage/framework/sessions \
          storage/framework/views \
          storage/logs \
          bootstrap/cache
+
+# Copy Raleway Dots font to storage/fonts/ if missing (volume mount may have empty fonts dir)
+if [ ! -f storage/fonts/RalewayDots-Regular.ttf ]; then
+    if [ -f /app/storage.defaults/fonts/RalewayDots-Regular.ttf ]; then
+        cp /app/storage.defaults/fonts/RalewayDots-Regular.ttf storage/fonts/
+    fi
+fi
+
 chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || \
 chown -R nobody:nobody storage bootstrap/cache 2>/dev/null || true
 chmod -R 775 storage bootstrap/cache

@@ -20,6 +20,7 @@ class Post extends Model
         'user_id',
         'content',
         'media_urls',
+        'watermark_settings',
         'tags',
         'first_comment',
         'alt_text',
@@ -34,6 +35,7 @@ class Post extends Model
     {
         return [
             'media_urls' => 'array',
+            'watermark_settings' => 'array',
             'tags' => 'array',
             'account_overrides' => 'array',
             'scheduled_at' => 'datetime',

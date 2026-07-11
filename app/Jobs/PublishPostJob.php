@@ -68,6 +68,39 @@ class PublishPostJob implements ShouldQueue
             $platformReq = \App\Services\PlatformRequirements::for($account->provider);
             $maxSizeMb = $platformReq['max_media_size_mb'] ?? null;
 
+            // Apply watermark if enabled on this post.
+            // Watermark is applied to each media URL listed in watermark_settings.applied_to
+            // before compression and publishing. Watermarked files are saved to
+            // storage/app/public/watermarked/ and used in place of the originals.
+            $watermarkSettings = $post->watermark_settings ?? [];
+            if (!empty($watermarkSettings['enabled']) && !empty($watermarkSettings['applied_to'])) {
+                $appliedTo = $watermarkSettings['applied_to'];
+                $watermarkedUrls = [];
+                foreach ($mediaUrls as $url) {
+                    if (in_array($url, $appliedTo, true)) {
+                        $watermarkedUrl = \App\Services\WatermarkService::apply($url, $watermarkSettings);
+                        if ($watermarkedUrl) {
+                            Log::info('Watermark applied to media', [
+                                'post_id' => $post->id,
+                                'original_url' => $url,
+                                'watermarked_url' => $watermarkedUrl,
+                            ]);
+                            $watermarkedUrls[] = $watermarkedUrl;
+                        } else {
+                            // Watermark failed — fall back to original (better than failing publish)
+                            Log::warning('Watermark failed, using original media', [
+                                'post_id' => $post->id,
+                                'url' => $url,
+                            ]);
+                            $watermarkedUrls[] = $url;
+                        }
+                    } else {
+                        $watermarkedUrls[] = $url;
+                    }
+                }
+                $mediaUrls = $watermarkedUrls;
+            }
+
             if ($maxSizeMb && !empty($mediaUrls)) {
                 $mediaUrls = \App\Services\MediaCompressionService::compressIfNeeded($mediaUrls, $maxSizeMb);
             }
