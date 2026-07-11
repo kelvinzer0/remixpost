@@ -211,8 +211,13 @@ class PdfImageMerger
         $objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
 
         // Object 2: Pages (will reference all page object numbers)
+        // CRITICAL: /Kids must be an array of INDIRECT REFERENCES ("N 0 R"),
+        // not plain numbers. Plain numbers like [3 4 5] are parsed as
+        // integers by PDF readers, causing "non-page object in page tree"
+        // errors and rendering blank pages.
         $pageObjectNums = range(3, 3 + $numImages - 1);
-        $objects[2] = "<< /Type /Pages /Kids [" . implode(' ', $pageObjectNums) . "] /Count {$numImages} >>";
+        $kidsRefs = array_map(fn($n) => "{$n} 0 R", $pageObjectNums);
+        $objects[2] = "<< /Type /Pages /Kids [" . implode(' ', $kidsRefs) . "] /Count {$numImages} >>";
 
         // Objects 3..(3+N-1): Page objects
         // Each page references:
