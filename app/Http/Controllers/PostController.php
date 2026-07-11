@@ -39,8 +39,8 @@ class PostController extends Controller
         $media = $request->user()
             ->media()
             ->orderBy('created_at', 'desc')
-            ->take(20)
-            ->get(['id', 'url', 'original_name', 'mime_type']);
+            ->take(50)
+            ->get(['id', 'url', 'original_name', 'mime_type', 'folder_path']);
 
         return Inertia::render('Posts/Create', [
             'accounts' => $accounts,
@@ -141,8 +141,8 @@ class PostController extends Controller
         $media = $request->user()
             ->media()
             ->orderBy('created_at', 'desc')
-            ->take(20)
-            ->get(['id', 'url', 'original_name', 'mime_type']);
+            ->take(50)
+            ->get(['id', 'url', 'original_name', 'mime_type', 'folder_path']);
 
         return Inertia::render('Posts/Edit', [
             'post' => $post,

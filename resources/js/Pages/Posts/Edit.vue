@@ -379,9 +379,37 @@ const minDate = () => {
     return d.toISOString().slice(0, 16);
 };
 
-// Media picker — let user add/remove media on edit (same UX as Create page)
+// Media picker with folder support — same UX as Create page
 const showMediaPicker = ref(false);
+const pickerCurrentFolder = ref('');
 const removeMedia = (i) => form.media_urls.splice(i, 1);
+
+const mediaFolders = computed(() => {
+    if (!props.media) return [];
+    const folders = new Set();
+    for (const m of props.media) {
+        if (m.folder_path) folders.add(m.folder_path);
+    }
+    return Array.from(folders).sort();
+});
+
+const filteredPickerMedia = computed(() => {
+    if (!props.media) return [];
+    return props.media.filter(m => {
+        const mFolder = m.folder_path || '';
+        return mFolder === pickerCurrentFolder.value;
+    });
+});
+
+const openMediaPicker = () => {
+    showMediaPicker.value = !showMediaPicker.value;
+    pickerCurrentFolder.value = '';
+};
+
+const selectMedia = (url) => {
+    form.media_urls.push(url);
+    showMediaPicker.value = false;
+};
 
 // ===== Tags =====
 const addTag = () => {
@@ -734,38 +762,55 @@ const supportsTags = computed(() => {
                                 ×
                             </button>
                         </div>
-                        <button type="button" @click="showMediaPicker = !showMediaPicker"
+                        <button type="button" @click="openMediaPicker"
                             class="w-20 h-20 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center text-gray-400 hover:border-brand-400 hover:text-brand-600">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                             </svg>
                         </button>
                     </div>
-                    <div v-if="showMediaPicker" class="mt-2 p-4 border border-gray-200 rounded-md max-h-64 overflow-y-auto">
-                        <div class="grid grid-cols-4 gap-2">
-                            <button v-for="item in (props.media || [])" :key="item.id"
-                                type="button"
-                                @click="form.media_urls.push(item.url); showMediaPicker = false"
-                                class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
-                                <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
-                                <div v-else-if="isVideoMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-gray-900">
-                                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
-                                </div>
-                                <div v-else-if="isPdfMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-rose-50">
-                                    <svg class="w-5 h-5 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
-                                    <span class="text-[8px] text-rose-700 mt-0.5 font-bold">PDF</span>
-                                </div>
-                                <div v-else class="w-full h-16 flex items-center justify-center bg-gray-100">
-                                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                    </svg>
-                                </div>
-                                <p class="text-xs text-gray-500 truncate px-1">{{ item.original_name }}</p>
+                    <div v-if="showMediaPicker" class="mt-2 p-4 border border-gray-200 rounded-md max-h-80 overflow-hidden flex gap-3">
+                        <!-- Folder sidebar -->
+                        <div v-if="mediaFolders.length > 0" class="w-40 flex-shrink-0 border-r border-gray-200 pr-2 overflow-y-auto">
+                            <button type="button" @click="pickerCurrentFolder = ''"
+                                class="block w-full text-left px-2 py-1 rounded text-xs cursor-pointer"
+                                :class="pickerCurrentFolder === '' ? 'bg-brand-100 text-brand-700 font-medium' : 'text-gray-700 hover:bg-gray-100'">
+                                📁 Root ({{ props.media?.filter(m => !m.folder_path).length || 0 }})
+                            </button>
+                            <button v-for="folder in mediaFolders" :key="folder" type="button"
+                                @click="pickerCurrentFolder = folder"
+                                class="block w-full text-left px-2 py-1 rounded text-xs cursor-pointer truncate"
+                                :class="pickerCurrentFolder === folder ? 'bg-brand-100 text-brand-700 font-medium' : 'text-gray-700 hover:bg-gray-100'">
+                                📁 {{ folder.split('/').pop() }} ({{ props.media?.filter(m => m.folder_path === folder).length || 0 }})
                             </button>
                         </div>
-                        <p v-if="!props.media || props.media.length === 0" class="text-xs text-gray-400 text-center py-4">
-                            No media uploaded. <Link href="/media" class="text-brand-600 underline">Upload some first</Link>.
-                        </p>
+                        <!-- Media grid -->
+                        <div class="flex-1 overflow-y-auto">
+                            <div v-if="filteredPickerMedia.length > 0" class="grid grid-cols-4 gap-2">
+                                <button v-for="item in filteredPickerMedia" :key="item.id"
+                                    type="button"
+                                    @click="selectMedia(item.url)"
+                                    class="border border-gray-200 rounded-md overflow-hidden hover:border-brand-500">
+                                    <img v-if="isImageMime(item.mime_type)" :src="item.url" class="w-full h-16 object-cover" />
+                                    <div v-else-if="isVideoMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-gray-900">
+                                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
+                                    </div>
+                                    <div v-else-if="isPdfMime(item.mime_type)" class="w-full h-16 flex flex-col items-center justify-center bg-rose-50">
+                                        <svg class="w-5 h-5 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                        <span class="text-[8px] text-rose-700 mt-0.5 font-bold">PDF</span>
+                                    </div>
+                                    <div v-else class="w-full h-16 flex items-center justify-center bg-gray-100">
+                                        <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                    </div>
+                                    <p class="text-xs text-gray-500 truncate px-1">{{ item.original_name }}</p>
+                                </button>
+                            </div>
+                            <p v-else class="text-xs text-gray-400 text-center py-4">
+                                No media in {{ pickerCurrentFolder || 'Root' }}. <Link href="/media" class="text-brand-600 underline">Upload some first</Link>.
+                            </p>
+                        </div>
                     </div>
                     <p class="mt-1 text-xs text-gray-500">Upload media in the <Link href="/media" class="text-brand-600">Media Manager</Link>, then select here. Klik × untuk hapus attachment.</p>
                 </div>
