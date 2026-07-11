@@ -105,11 +105,23 @@ class BufferPublisher implements PublisherInterface
                 }
             }
 
+            // Build per-channel metadata (tags, first comment, Pinterest board, IG post type, etc.)
+            $channelService = $metadata['channel_service'] ?? 'unknown';
+
+            // Instagram Reel/Story only support 1 media item per post.
+            // If IG type is reel or story with multiple media, trim to first item.
+            // (Post type supports carousel — multiple images OK.)
+            if ($channelService === 'instagram') {
+                $igType = $metadata['instagram_post_type'] ?? 'post';
+                if (in_array($igType, ['reel', 'story']) && count($mediaUrls) > 1) {
+                    $mediaUrls = [$mediaUrls[0]];
+                    $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
+                }
+            }
+
             // Build assets array from media URLs
             $assetsGraphQL = $this->buildAssetsGraphQL($mediaUrls);
 
-            // Build per-channel metadata (tags, first comment, Pinterest board, IG post type, etc.)
-            $channelService = $metadata['channel_service'] ?? 'unknown';
             $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata);
 
             // Build mutation input — note: GraphQL input fields use camelCase
