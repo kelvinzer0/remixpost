@@ -162,11 +162,52 @@ class BufferPublisher implements PublisherInterface
 
             $metadataGraphQL = $this->buildMetadataGraphQL($channelService, $tags, $firstComment, $metadata);
 
+            // Scheduling type logic (verified via Buffer GraphQL introspection 2026-07-12):
+            //   SchedulingType enum: 'automatic' | 'notification'
+            //   - 'automatic' = Buffer auto-publishes via API
+            //   - 'notification' = Buffer sends push notification to user's mobile app,
+            //     user opens Buffer app → edits post (adds music, stickers, effects)
+            //     → publishes natively. Required for Instagram Reels/Stories with
+            //     music + TikTok with sounds/effects.
+            //   Ref: https://support.buffer.com/article/658-using-notification-publishing
+            //        https://support.buffer.com/article/933-adding-music-stickers-and-other-effects-to-instagram-and-tiktok-posts
+            //
+            // Auto-detect: Instagram & TikTok via Buffer default to 'notification'
+            // because Buffer API cannot attach music/stickers/effects. User must
+            // edit in Buffer mobile app to add those before publishing natively.
+            // Other channels (Facebook, LinkedIn, Twitter, etc.) use 'automatic'.
+            //
+            // Per-post override: user can force 'automatic' or 'notification' via
+            // account_overrides[channelId].scheduling_type (useful for IG feed
+            // posts that don't need music → 'automatic' is faster).
+            $schedulingType = 'automatic'; // default
+            if (in_array($channelService, ['instagram', 'tiktok'], true)) {
+                $schedulingType = 'notification';
+            }
+
+            // Check per-post override (accountId = account['id'])
+            $accountId = (string) ($post['account_id'] ?? $account['id'] ?? '');
+            $overrides = $post['account_overrides'] ?? [];
+            if (!empty($overrides[$accountId]['scheduling_type'])) {
+                $overrideType = $overrides[$accountId]['scheduling_type'];
+                if (in_array($overrideType, ['automatic', 'notification'], true)) {
+                    $schedulingType = $overrideType;
+                }
+            }
+
+            // Notification mode requires dueAt (scheduled time) — Buffer sends
+            // notification at that time. Cannot use shareNow with notification.
+            if ($schedulingType === 'notification' && $mode === 'shareNow') {
+                // Force customScheduled with dueAt = now + 5 min (minimum future time)
+                $mode = 'customScheduled';
+                $dueAt = now()->addMinutes(5)->toIso8601String();
+            }
+
             // Build mutation input — note: GraphQL input fields use camelCase
             $inputLines = [
                 'text: ' . json_encode($content),
                 'channelId: ' . json_encode($channelId),
-                'schedulingType: automatic',
+                'schedulingType: ' . $schedulingType,
                 'mode: ' . $mode,
             ];
             if ($dueAt) {
@@ -228,7 +269,7 @@ class BufferPublisher implements PublisherInterface
                     $inputLinesRetry = [
                         'text: ' . json_encode($content),
                         'channelId: ' . json_encode($channelId),
-                        'schedulingType: automatic',
+                        'schedulingType: ' . $schedulingType,
                         'mode: ' . $mode,
                     ];
                     if ($dueAt) {
@@ -301,10 +342,23 @@ class BufferPublisher implements PublisherInterface
             }
 
             $status = $createPost['post']['status'] ?? 'scheduled';
+            $channelSvc = $metadata['channel_service'] ?? 'unknown';
+
+            // Build info message — notification mode needs special instructions
+            if ($schedulingType === 'notification') {
+                $info = "Post scheduled in Buffer with **Notify Me** mode (status: {$status}). "
+                    . "Buffer will send a push notification to your mobile at the scheduled time. "
+                    . "Open the Buffer mobile app when notified to edit the post — add music, "
+                    . "stickers, effects, or sounds — then tap Publish to post natively to {$channelSvc}.";
+            } else {
+                $info = "Post created in Buffer (status: {$status}, mode: {$mode}). "
+                    . "Buffer will auto-publish to {$channelSvc} at the scheduled time.";
+            }
+
             return [
                 'success' => true,
                 'external_id' => $postId,
-                'info' => "Post created in Buffer (status: {$status}, mode: {$mode}). Buffer will publish to {$metadata['channel_service']} at the scheduled time.",
+                'info' => $info,
             ];
         } catch (Exception $e) {
             return [

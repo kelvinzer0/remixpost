@@ -130,6 +130,15 @@ const isBufferPinterest = (account) =>
 const isBufferInstagram = (account) =>
     account.provider === 'buffer' && account.metadata?.channel_service === 'instagram';
 
+const isBufferTikTok = (account) =>
+    account.provider === 'buffer' && account.metadata?.channel_service === 'tiktok';
+
+// Buffer channels that use "Notify Me" (notification) mode by default
+// because Buffer API cannot attach music/stickers/effects. User must
+// edit in Buffer mobile app to add those before publishing natively.
+const isBufferNotifyChannel = (account) =>
+    isBufferInstagram(account) || isBufferTikTok(account);
+
 const isWhatsApp = (account) => account.provider === 'whatsapp';
 
 // ===== WhatsApp per-account overrides (target_type + target) =====
@@ -912,6 +921,47 @@ const minDate = () => {
                                             class="text-pink-500 focus:ring-pink-400" />
                                         <span class="text-xs text-gray-700">Story</span>
                                     </label>
+                                </div>
+                            </div>
+
+                            <!-- Buffer Notify Me banner for IG/TikTok (notification mode) -->
+                            <div v-if="isBufferNotifyChannel(account) && form.account_ids.includes(account.id)"
+                                class="mt-2 ml-8 pl-3 border-l-2 border-blue-200 space-y-2">
+                                <div class="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-900">
+                                    <p class="font-semibold flex items-center gap-1">
+                                        🔔 Notify Me Mode (default)
+                                    </p>
+                                    <p class="mt-0.5">
+                                        Buffer API tidak bisa attach music/stickers/effects. Post akan dikirim ke
+                                        mobile app Buffer → kamu dapat notifikasi → edit di app (tambah sound viral,
+                                        stickers, dll) → publish native ke {{ isBufferInstagram(account) ? 'Instagram' : 'TikTok' }}.
+                                    </p>
+                                    <p class="mt-1 text-[10px] text-blue-700">
+                                        Ref: <a href="https://support.buffer.com/article/933-adding-music-stickers-and-other-effects-to-instagram-and-tiktok-posts" target="_blank" class="underline">Buffer Help: Music, Stickers & Effects</a>
+                                    </p>
+                                </div>
+
+                                <!-- Override: switch to automatic mode (no music editing) -->
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">⚡ Publish Mode</label>
+                                    <div class="flex gap-3">
+                                        <label class="inline-flex items-center gap-1 cursor-pointer">
+                                            <input type="radio" :name="'sched-' + account.id"
+                                                :checked="(form.account_overrides[account.id]?.scheduling_type || 'notification') === 'notification'"
+                                                @change="setOverride(account.id, 'scheduling_type', 'notification')"
+                                                class="text-blue-500 focus:ring-blue-400" />
+                                            <span class="text-xs text-gray-700">🔔 Notify Me</span>
+                                            <span class="text-[9px] text-gray-400">(edit di mobile)</span>
+                                        </label>
+                                        <label class="inline-flex items-center gap-1 cursor-pointer">
+                                            <input type="radio" :name="'sched-' + account.id"
+                                                :checked="form.account_overrides[account.id]?.scheduling_type === 'automatic'"
+                                                @change="setOverride(account.id, 'scheduling_type', 'automatic')"
+                                                class="text-blue-500 focus:ring-blue-400" />
+                                            <span class="text-xs text-gray-700">⚡ Auto-publish</span>
+                                            <span class="text-[9px] text-gray-400">(tanpa sound/sticker)</span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
 
