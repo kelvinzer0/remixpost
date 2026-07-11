@@ -75,12 +75,18 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/media', [\App\Http\Controllers\MediaController::class, 'index'])->name('media.index');
     Route::post('/media', [\App\Http\Controllers\MediaController::class, 'store'])->name('media.store');
-    Route::post('/media/{id}/move', [\App\Http\Controllers\MediaController::class, 'move'])->name('media.move');
+    // Bulk routes MUST come before {id} routes — otherwise '/media/bulk/move'
+    // gets matched by '/media/{id}/move' with $id='bulk', causing a TypeError
+    // because move() expects int $id. Same for '/media/folder/*'.
     Route::post('/media/folder/create', [\App\Http\Controllers\MediaController::class, 'createFolder'])->name('media.folder.create');
     Route::post('/media/folder/delete', [\App\Http\Controllers\MediaController::class, 'deleteFolder'])->name('media.folder.delete');
     Route::post('/media/bulk/move', [\App\Http\Controllers\MediaController::class, 'bulkMove'])->name('media.bulk.move');
     Route::post('/media/bulk/delete', [\App\Http\Controllers\MediaController::class, 'bulkDelete'])->name('media.bulk.delete');
-    Route::delete('/media/{id}', [\App\Http\Controllers\MediaController::class, 'destroy'])->name('media.destroy');
+    // {id} routes — constrained to numeric to prevent matching 'bulk', 'folder', etc.
+    Route::post('/media/{id}/move', [\App\Http\Controllers\MediaController::class, 'move'])
+        ->whereNumber('id')->name('media.move');
+    Route::delete('/media/{id}', [\App\Http\Controllers\MediaController::class, 'destroy'])
+        ->whereNumber('id')->name('media.destroy');
 
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
 
