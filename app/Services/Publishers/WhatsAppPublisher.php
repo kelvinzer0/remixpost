@@ -502,39 +502,71 @@ class WhatsAppPublisher implements PublisherInterface
      */
     private function callEvolution(string $method, string $url, array $headers, array $payload, string $label, int $timeout = 60): array
     {
-        try {
-            $response = $this->httpClient->request($method, $url, [
-                'headers' => $headers,
-                'json' => $payload,
-                'timeout' => $timeout,
-                'connect_timeout' => 10,
-            ]);
-            return [true, $response->getBody()->getContents(), null];
-        } catch (\GuzzleHttp\Exception\ConnectException $e) {
-            // Connection error or timeout (no HTTP response received).
-            // Treat as success-with-warning — the message was likely sent.
-            return [false, '', [
-                'success' => true,
-                'external_id' => null,
-                'warning' => "Evolution API tidak merespons dalam {$timeout}s ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi oleh Evolution API.",
-            ]];
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
-            $resp = $e->getResponse();
-            if (!$resp) {
-                // No response = connection-level failure (timeout, DNS, etc.)
+        // Retry on 500 AggregateError — Evolution API (Baileys/Node.js) intermittently
+        // fails to fetch media or upload to mmg.whatsapp.net. Verified that retrying
+        // the exact same request succeeds (post 97 failed at 21:10, retry at 21:15
+        // succeeded with HTTP 201 in 16s). Retrying 2x with 5s backoff handles
+        // transient network/Baileys issues without masking real failures.
+        $maxRetries = 2;
+        $retryDelay = 5; // seconds
+
+        for ($attempt = 1; $attempt <= $maxRetries + 1; $attempt++) {
+            try {
+                $response = $this->httpClient->request($method, $url, [
+                    'headers' => $headers,
+                    'json' => $payload,
+                    'timeout' => $timeout,
+                    'connect_timeout' => 10,
+                ]);
+                return [true, $response->getBody()->getContents(), null];
+            } catch (\GuzzleHttp\Exception\ConnectException $e) {
+                // Connection error or timeout (no HTTP response received).
+                // Treat as success-with-warning — the message was likely sent.
                 return [false, '', [
                     'success' => true,
                     'external_id' => null,
-                    'warning' => "Evolution API tidak merespons ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi.",
+                    'warning' => "Evolution API tidak merespons dalam {$timeout}s ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi oleh Evolution API.",
+                ]];
+            } catch (\GuzzleHttp\Exception\RequestException $e) {
+                $resp = $e->getResponse();
+                if (!$resp) {
+                    // No response = connection-level failure (timeout, DNS, etc.)
+                    return [false, '', [
+                        'success' => true,
+                        'external_id' => null,
+                        'warning' => "Evolution API tidak merespons ({$label}). Pesan kemungkinan terkirim ke WhatsApp, tapi tidak dikonfirmasi.",
+                    ]];
+                }
+
+                $statusCode = $resp->getStatusCode();
+                $body = $resp->getBody()->getContents();
+
+                // Retry on 500 with "AggregateError" — intermittent Baileys media
+                // fetch/upload failure. Not a real error, just transient.
+                if ($statusCode === 500 && $attempt <= $maxRetries) {
+                    $isAggregateError = str_contains($body, 'AggregateError');
+                    Log::warning("Evolution API 500 (attempt {$attempt}/{$maxRetries}), retrying in {$retryDelay}s", [
+                        'label' => $label,
+                        'body' => substr($body, 0, 300),
+                        'is_aggregate_error' => $isAggregateError,
+                    ]);
+                    sleep($retryDelay);
+                    continue;
+                }
+
+                // Real HTTP error (4xx/5xx after retries exhausted) — return as failure.
+                return [false, '', [
+                    'success' => false,
+                    'error' => "Evolution API error {$statusCode} ({$label}): {$body}",
                 ]];
             }
-            // Real HTTP error (4xx/5xx) — return as failure.
-            $body = $resp->getBody()->getContents();
-            return [false, '', [
-                'success' => false,
-                'error' => "Evolution API error {$resp->getStatusCode()} ({$label}): {$body}",
-            ]];
         }
+
+        // Should not reach here, but fallback
+        return [false, '', [
+            'success' => false,
+            'error' => "Evolution API failed after {$maxRetries} retries ({$label}).",
+        ]];
     }
 
     /**
