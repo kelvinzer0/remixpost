@@ -61,7 +61,7 @@ class WatermarkService
     public const DEFAULTS = [
         'text' => 'warunglakku.com',
         'position' => 'bottom-right',
-        'font_size' => 24,        // points (image) / height pct relative (video)
+        'font_size' => 18,        // points (image) / height pct relative (video)
         'opacity' => 60,          // 0-100
     ];
 
