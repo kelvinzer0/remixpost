@@ -245,11 +245,13 @@ class BufferPublisher implements PublisherInterface
 
         // Instagram post type (post/reel/story) — from channel metadata or per-post override
         // Stored as 'instagram_post_type' in overrides, but Buffer GraphQL expects 'type' field
-        // inside InstagramPostMetadataInput.
+        // inside InstagramPostMetadataInput. GraphQL enum values must be UPPERCASE.
         if ($channelService === 'instagram') {
             $postType = $accountMetadata['instagram_post_type'] ?? null;
             if ($postType) {
-                $igParts = ["type: {$postType}"];
+                // Buffer GraphQL PostType enum: POST, REEL, STORY (uppercase)
+                $postTypeUpper = strtoupper($postType);
+                $igParts = ["type: {$postTypeUpper}"];
                 if (!empty($firstComment)) {
                     $igParts[] = "firstComment: " . json_encode($firstComment);
                 }
