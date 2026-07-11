@@ -39,6 +39,7 @@ const isWhatsApp = (account) => account.provider === 'whatsapp';
 const waTargets = ref({}); // { accountId: [{ id, name, picture, description, phone? }] }
 const loadingWaTargetsFor = ref({});
 const waSearch = ref({}); // { accountId: 'search text' }
+const waTargetError = ref({}); // { accountId: 'error message' }
 
 const fetchWaTargets = async (accountId, targetType) => {
     if (!targetType || targetType === 'story') return;
@@ -60,10 +61,12 @@ const fetchWaTargets = async (accountId, targetType) => {
             waTargets.value[accountId] = data.targets;
         } else if (data.error) {
             console.error('Failed to fetch WA targets:', data.error);
+            waTargetError.value[accountId] = data.error;
             waTargets.value[accountId] = [];
         }
     } catch (e) {
         console.error('Failed to fetch WA targets:', e);
+        waTargetError.value[accountId] = 'Gagal fetch: ' + e.message;
         waTargets.value[accountId] = [];
     } finally {
         loadingWaTargetsFor.value[accountId] = false;
@@ -780,6 +783,16 @@ const minDate = () => {
                                         Memuat list dari Evolution API…
                                     </div>
 
+                                    <!-- Error + reload button -->
+                                    <div v-else-if="waTargetError[account.id]" class="p-2 bg-red-50 border border-red-200 rounded text-xs">
+                                        <p class="text-red-600 mb-1">⚠️ {{ waTargetError[account.id] }}</p>
+                                        <button type="button"
+                                            @click="fetchWaTargets(account.id, form.account_overrides[account.id]?.target_type)"
+                                            class="px-2 py-1 text-xs text-white bg-red-600 rounded hover:bg-red-700">
+                                            ↻ Reload
+                                        </button>
+                                    </div>
+
                                     <!-- Target list with pictures -->
                                     <div v-else-if="waTargets[account.id]?.length > 0"
                                         class="max-h-56 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
@@ -805,8 +818,15 @@ const minDate = () => {
                                         </button>
                                     </div>
 
-                                    <!-- Empty state -->
-                                    <p v-else class="text-xs text-gray-400 italic">Tidak ada target ditemukan.</p>
+                                    <!-- Empty state + reload -->
+                                    <div v-else class="p-2 bg-gray-50 border border-gray-200 rounded text-xs text-gray-400">
+                                        <p>Tidak ada target ditemukan.</p>
+                                        <button type="button"
+                                            @click="fetchWaTargets(account.id, form.account_overrides[account.id]?.target_type)"
+                                            class="mt-1 px-2 py-1 text-xs text-green-700 bg-green-50 rounded hover:bg-green-100 border border-green-200">
+                                            ↻ Reload List
+                                        </button>
+                                    </div>
 
                                     <!-- Manual input for User (phone number) -->
                                     <div v-if="form.account_overrides[account.id]?.target_type === 'user'" class="mt-1">
