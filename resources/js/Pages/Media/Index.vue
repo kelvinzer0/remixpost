@@ -538,6 +538,12 @@ const doMergePdf = () => {
                                 <input type="checkbox" :checked="isSelected(item.id)" @click.stop="toggleSelect(item.id)"
                                     class="w-5 h-5 rounded border-white bg-white/90 text-brand-600 focus:ring-brand-500 shadow-sm" />
                             </div>
+                            <!-- Aspect ratio badge (top-right) — only for image/video -->
+                            <span v-if="item.aspect_ratio"
+                                class="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 text-[10px] font-semibold text-white bg-black/70 backdrop-blur-sm rounded"
+                                :title="item.dimensions ? `${item.dimensions.w} × ${item.dimensions.h}px` : ''">
+                                {{ item.aspect_ratio }}
+                            </span>
                             <div class="aspect-square bg-gray-100 flex items-center justify-center">
                                 <img v-if="isImage(item.mime_type)" :src="item.url" :alt="item.original_name"
                                     class="w-full h-full object-cover" />

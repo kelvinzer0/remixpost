@@ -31,6 +31,16 @@ class MediaController extends Controller
 
         $media = $query->paginate(24)->withQueryString();
 
+        // Append dimensions + aspect ratio label for each image/video item
+        // so the frontend can show a "16:9" / "1:1" / "9:16" badge on cards
+        // without needing to fetch each file client-side.
+        $media->getCollection()->transform(function ($item) {
+            $dims = $this->getMediaDimensions($item);
+            $item->dimensions = $dims; // null for non-image/video
+            $item->aspect_ratio = $dims ? $this->aspectRatioLabel($dims['w'], $dims['h']) : null;
+            return $item;
+        });
+
         // Build folder tree from all media for this user
         $folderTree = $this->buildFolderTree($request->user()->id);
 
@@ -39,6 +49,117 @@ class MediaController extends Controller
             'currentFolder' => $folder,
             'folderTree' => $folderTree,
         ]);
+    }
+
+    /**
+     * Get pixel dimensions {w, h} for an image or video media item.
+     * Returns null for non-image/video types or on failure.
+     *
+     * Image: uses PHP getimagesize() (fast, no external deps)
+     * Video: uses ffprobe (already installed in container)
+     */
+    private function getMediaDimensions($media): ?array
+    {
+        $localPath = storage_path('app/public/' . $media->path);
+        if (!file_exists($localPath)) {
+            return null;
+        }
+
+        $mime = $media->mime_type ?? mime_content_type($localPath);
+
+        // Image — getimagesize() supports jpeg/png/gif/webp/bmp
+        if (str_starts_with($mime, 'image/')) {
+            $info = @getimagesize($localPath);
+            if ($info && isset($info[0], $info[1])) {
+                return ['w' => (int) $info[0], 'h' => (int) $info[1]];
+            }
+            return null;
+        }
+
+        // Video — use ffprobe (already installed via ffmpeg in Dockerfile)
+        if (str_starts_with($mime, 'video/')) {
+            $ffprobe = trim((string) shell_exec('which ffprobe 2>/dev/null') ?? '');
+            if (!$ffprobe || !file_exists($ffprobe)) {
+                return null;
+            }
+            $cmd = sprintf(
+                '%s -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 %s 2>/dev/null',
+                escapeshellarg($ffprobe),
+                escapeshellarg($localPath)
+            );
+            $output = trim((string) shell_exec($cmd) ?? '');
+            if ($output && str_contains($output, ',')) {
+                [$w, $h] = explode(',', $output, 2);
+                $w = (int) trim($w);
+                $h = (int) trim($h);
+                if ($w > 0 && $h > 0) {
+                    return ['w' => $w, 'h' => $h];
+                }
+            }
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Compute a human-readable aspect ratio label from width + height.
+     *
+     * Returns common ratios as their standard labels:
+     *   1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 21:9, 5:4, 4:5
+     * Falls back to simplified GCD-based ratio (e.g. "1920:1080" → "16:9",
+     * "1366:768" → "683:384" since GCD=2, but we cap to 2-digit numbers).
+     *
+     * Returns null if dimensions are invalid.
+     */
+    private function aspectRatioLabel(int $w, int $h): ?string
+    {
+        if ($w <= 0 || $h <= 0) return null;
+
+        // Common ratios — check exact match or within 2% tolerance
+        // (handles rounding like 1920x1080 → 16:9, 1080x1920 → 9:16)
+        $ratio = $w / $h;
+        $common = [
+            '1:1'   => 1.0,
+            '16:9'  => 16 / 9,    // ~1.778
+            '9:16'  => 9 / 16,    // ~0.563
+            '4:3'   => 4 / 3,     // ~1.333
+            '3:4'   => 3 / 4,     // ~0.750
+            '3:2'   => 3 / 2,     // ~1.500
+            '2:3'   => 2 / 3,     // ~0.667
+            '21:9'  => 21 / 9,    // ~2.333
+            '5:4'   => 5 / 4,     // ~1.250
+            '4:5'   => 4 / 5,     // ~0.800
+            '2:1'   => 2 / 1,     // 2.000
+            '1:2'   => 1 / 2,     // 0.500
+        ];
+
+        foreach ($common as $label => $target) {
+            // Within 2% tolerance — handles slight rounding differences
+            if (abs($ratio - $target) / $target < 0.02) {
+                return $label;
+            }
+        }
+
+        // Fallback: GCD-based simplification
+        $gcd = function ($a, $b) {
+            while ($b != 0) {
+                [$a, $b] = [$b, $a % $b];
+            }
+            return $a;
+        };
+        $g = $gcd($w, $h);
+        $sw = $w / $g;
+        $sh = $h / $g;
+
+        // Cap to reasonable numbers — if simplified ratio has very large
+        // numbers (e.g. 683:384), round to nearest common form
+        if ($sw > 50 || $sh > 50) {
+            // Round to 1 decimal place as fallback
+            return number_format($ratio, 1) . ':1';
+        }
+
+        return "{$sw}:{$sh}";
     }
 
     /**
