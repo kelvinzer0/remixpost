@@ -168,9 +168,74 @@ class BufferPublisher implements PublisherInterface
             // Typed mutation error (data.createPost.message)
             $createPost = $body['data']['createPost'] ?? null;
             if ($createPost && isset($createPost['message']) && !isset($createPost['post'])) {
+                $errMsg = $createPost['message'];
+
+                // Retry without firstComment if the error is about paid plan
+                // (firstComment requires Buffer paid plan — free plan can't use it)
+                if (str_contains(strtolower($errMsg), 'first comment') && str_contains(strtolower($errMsg), 'paid plan')) {
+                    // Rebuild mutation without firstComment
+                    $metadataGraphQLRetry = $this->buildMetadataGraphQL($channelService, $tags, null, $metadata);
+                    $inputLinesRetry = [
+                        'text: ' . json_encode($content),
+                        'channelId: ' . json_encode($channelId),
+                        'schedulingType: automatic',
+                        'mode: ' . $mode,
+                    ];
+                    if ($dueAt) {
+                        $inputLinesRetry[] = 'dueAt: ' . json_encode($dueAt);
+                    }
+                    if (!empty($assetsGraphQL)) {
+                        $inputLinesRetry[] = 'assets: [' . implode(', ', $assetsGraphQL) . ']';
+                    }
+                    if ($metadataGraphQLRetry) {
+                        $inputLinesRetry[] = 'metadata: { ' . $metadataGraphQLRetry . ' }';
+                    }
+
+                    $mutationRetry = 'mutation {
+  createPost(input: {
+    ' . implode(",\n    ", $inputLinesRetry) . '
+  }) {
+    ... on PostActionSuccess { post { id status dueAt } }
+    ... on MutationError { message }
+  }
+}';
+
+                    $responseRetry = Http::withToken($accessToken)
+                        ->post(config('services.buffer.api_url'), [
+                            'query' => $mutationRetry,
+                        ]);
+
+                    $bodyRetry = $responseRetry->json();
+
+                    if (isset($bodyRetry['errors']) && !empty($bodyRetry['errors'])) {
+                        return [
+                            'success' => false,
+                            'error' => "Buffer API error (retry without firstComment): " . ($bodyRetry['errors'][0]['message'] ?? 'Unknown'),
+                            'response' => $bodyRetry,
+                        ];
+                    }
+
+                    $createPostRetry = $bodyRetry['data']['createPost'] ?? null;
+                    if ($createPostRetry && isset($createPostRetry['post'])) {
+                        $postId = $createPostRetry['post']['id'] ?? null;
+                        $status = $createPostRetry['post']['status'] ?? 'scheduled';
+                        return [
+                            'success' => true,
+                            'external_id' => $postId,
+                            'info' => 'Post created in Buffer (status: ' . $status . ', mode: ' . $mode . '). First comment skipped — requires paid plan.',
+                        ];
+                    }
+
+                    return [
+                        'success' => false,
+                        'error' => 'Buffer retry (without firstComment) also failed: ' . ($createPostRetry['message'] ?? 'Unknown'),
+                        'response' => $bodyRetry,
+                    ];
+                }
+
                 return [
                     'success' => false,
-                    'error' => 'Buffer createPost failed: ' . $createPost['message'],
+                    'error' => 'Buffer createPost failed: ' . $errMsg,
                     'response' => $body,
                 ];
             }
@@ -250,12 +315,10 @@ class BufferPublisher implements PublisherInterface
         // Buffer GraphQL schema (verified via introspection):
         //   InstagramPostMetadataInput {
         //     type: PostType!              (REQUIRED — enum: post, reel, story, short, carousel, etc.)
-        //     firstComment: String         (optional)
-        //     link: String                 (optional)
         //     shouldShareToFeed: Boolean!  (REQUIRED — whether to also post to IG feed)
-        //     geolocation: ...             (optional)
-        //     stickerFields: ...           (optional)
-        //     isAiGenerated: Boolean       (optional)
+        //     firstComment: String         (optional — BUT requires Buffer PAID plan)
+        //     link: String                 (optional)
+        //     ...
         //   }
         //
         // PostType enum values are LOWERCASE: post, reel, story (NOT POST/REEL/STORY)
@@ -264,6 +327,9 @@ class BufferPublisher implements PublisherInterface
             if ($postType) {
                 $igParts = ["type: {$postType}"];  // lowercase — enum values
                 $igParts[] = "shouldShareToFeed: true";  // REQUIRED field — share to IG feed
+                // firstComment is optional but requires Buffer paid plan.
+                // Only include if explicitly set — free plan users will get error if included.
+                // We include it and handle the error gracefully in the response handler.
                 if (!empty($firstComment)) {
                     $igParts[] = "firstComment: " . json_encode($firstComment);
                 }
