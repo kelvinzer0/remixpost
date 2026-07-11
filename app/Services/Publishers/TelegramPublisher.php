@@ -219,22 +219,47 @@ class TelegramPublisher implements PublisherInterface
             $media[] = $item;
         }
 
+        // Use http_errors => false so Guzzle doesn't throw on 400/500.
+        // We want to catch the error and fall back to sending individually.
         $response = $this->httpClient->post("{$apiBase}/sendMediaGroup", [
             'form_params' => [
                 'chat_id' => $chatId,
                 'media' => json_encode($media),
             ],
+            'http_errors' => false,
         ]);
 
-        $result = $this->parseResponse($response);
+        $body = json_decode($response->getBody()->getContents(), true);
 
-        // If media group fails because of mixed document types, fall back to
-        // sending each item individually (with caption on first only).
-        if (!$result['success'] && !empty($mediaUrls)) {
-            return $this->sendIndividually($apiBase, $chatId, $caption, $mediaUrls);
+        if (!($body['ok'] ?? false)) {
+            // sendMediaGroup failed — fall back to sending each item individually
+            // Common causes: WEBPAGE_MEDIA_INVALID (URL too large for Telegram to
+            // fetch), mixed document types, media type mismatch.
+            $errorMsg = $body['description'] ?? 'Unknown Telegram error';
+            // Try individual sends
+            $individualResult = $this->sendIndividually($apiBase, $chatId, $caption, $mediaUrls);
+            if ($individualResult['success']) {
+                $individualResult['warning'] = "Media group failed ({$errorMsg}), sent individually instead.";
+                return $individualResult;
+            }
+            return [
+                'success' => false,
+                'error' => "Telegram sendMediaGroup failed: {$errorMsg}. Individual fallback also failed: " . ($individualResult['error'] ?? 'Unknown'),
+            ];
         }
 
-        return $result;
+        // Success — extract message ID
+        $messageId = null;
+        if (isset($body['result'][0]['message_id'])) {
+            $messageId = (string) $body['result'][0]['message_id'];
+        } elseif (isset($body['result']['message_id'])) {
+            $messageId = (string) $body['result']['message_id'];
+        }
+
+        return [
+            'success' => true,
+            'external_id' => $messageId,
+        ];
     }
 
     /**
