@@ -941,6 +941,22 @@ const minDate = () => {
                                     </p>
                                 </div>
 
+                                <!-- Mobile app setup warning -->
+                                <div class="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900">
+                                    <p class="font-semibold">⚠️ Prasyarat Mobile App</p>
+                                    <p class="mt-0.5">
+                                        Pastikan <strong>Buffer mobile app</strong> terinstall di HP dan login dengan
+                                        email yang sama dengan akun Buffer yang connect di sini. Enable push
+                                        notifications di phone settings. Tanpa ini, notifikasi tidak akan diterima.
+                                    </p>
+                                    <div class="mt-1 flex gap-2">
+                                        <a href="https://apps.apple.com/app/buffer-plan-schedule-posts/id447471524" target="_blank"
+                                            class="text-amber-700 underline">iOS App Store</a>
+                                        <a href="https://play.google.com/store/apps/details?id=org.buffer.android" target="_blank"
+                                            class="text-amber-700 underline">Google Play</a>
+                                    </div>
+                                </div>
+
                                 <!-- Override: switch to automatic mode (no music editing) -->
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">⚡ Publish Mode</label>

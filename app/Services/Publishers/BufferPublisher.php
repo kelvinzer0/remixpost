@@ -229,6 +229,16 @@ class BufferPublisher implements PublisherInterface
   }
 }';
 
+            // For notification mode, check if user has active mobile device registered.
+            // If not, the notification won't be delivered — warn the user in info message.
+            $hasActiveDevice = null; // null = unknown, true/false after check
+            if ($schedulingType === 'notification') {
+                $deviceQuery = 'query { channel(input: { id: ' . json_encode($channelId) . ' }) { hasActiveMemberDevice } }';
+                $deviceResp = Http::withToken($accessToken)->post(config('services.buffer.api_url'), ['query' => $deviceQuery]);
+                $deviceBody = $deviceResp->json();
+                $hasActiveDevice = $deviceBody['data']['channel']['hasActiveMemberDevice'] ?? null;
+            }
+
             // Send to Buffer GraphQL API
             $response = Http::withToken($accessToken)
                 ->post(config('services.buffer.api_url'), [
@@ -350,6 +360,19 @@ class BufferPublisher implements PublisherInterface
                     . "Buffer will send a push notification to your mobile at the scheduled time. "
                     . "Open the Buffer mobile app when notified to edit the post — add music, "
                     . "stickers, effects, or sounds — then tap Publish to post natively to {$channelSvc}.";
+
+                // Warn if no active mobile device registered
+                if ($hasActiveDevice === false) {
+                    $info .= "\n\n⚠️ WARNING: No active mobile device detected for this Buffer account. "
+                        . "You will NOT receive the push notification! "
+                        . "To fix: install the Buffer mobile app (iOS App Store / Google Play), "
+                        . "login with the same email used to connect this Buffer account, "
+                        . "and enable push notifications for the Buffer app in your phone settings. "
+                        . "After logging in, the device will be registered automatically.";
+                } else {
+                    $info .= "\n\nMake sure Buffer mobile app is installed and you're logged in "
+                        . "with the same account. Push notifications must be enabled in phone settings.";
+                }
             } else {
                 $info = "Post created in Buffer (status: {$status}, mode: {$mode}). "
                     . "Buffer will auto-publish to {$channelSvc} at the scheduled time.";
