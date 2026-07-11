@@ -97,7 +97,10 @@ class MediaController extends Controller
     }
 
     /**
-     * Create a new folder (virtual — just a name, no physical directory).
+     * Create a new folder.
+     *
+     * Folders are virtual — stored as a row in the media_folders table
+     * so they show up in the tree even when empty.
      */
     public function createFolder(Request $request)
     {
@@ -111,28 +114,31 @@ class MediaController extends Controller
 
         $folderPath = $parent ? "{$parent}/{$name}" : $name;
 
-        // Check if folder already exists (any media in it)
-        $exists = Media::where('user_id', $request->user()->id)
-            ->where('folder_path', $folderPath)
+        // Check if folder already exists
+        $exists = DB::table('media_folders')
+            ->where('user_id', $request->user()->id)
+            ->where('path', $folderPath)
             ->exists();
 
-        // Also check subfolders
-        $hasSubfolder = Media::where('user_id', $request->user()->id)
-            ->where('folder_path', 'like', $folderPath . '/%')
-            ->exists();
-
-        if ($exists || $hasSubfolder) {
-            return back()->with('message', "Folder '{$folderPath}' already exists.");
+        if ($exists) {
+            return back()->with('error', "Folder '{$folderPath}' already exists.");
         }
 
-        // Folder is virtual — no physical creation needed.
-        // It will appear in the tree once media is uploaded to it.
-        // But we can create a placeholder by returning the path.
-        return back()->with('message', "Folder '{$folderPath}' created. Upload media to it.");
+        // Create folder record
+        DB::table('media_folders')->insert([
+            'user_id' => $request->user()->id,
+            'name' => $name,
+            'path' => $folderPath,
+            'parent_path' => $parent ?: null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return back()->with('message', "Folder '{$folderPath}' created.");
     }
 
     /**
-     * Delete a folder (moves all media in it to parent or root).
+     * Delete a folder (moves all media in it to root + deletes folder record).
      */
     public function deleteFolder(Request $request)
     {
@@ -142,7 +148,7 @@ class MediaController extends Controller
 
         $folderPath = trim($validated['folder_path'], '/');
 
-        // Move all media in this folder to root (null folder_path)
+        // Move all media in this folder to root
         Media::where('user_id', $request->user()->id)
             ->where('folder_path', $folderPath)
             ->update(['folder_path' => null]);
@@ -151,6 +157,15 @@ class MediaController extends Controller
         Media::where('user_id', $request->user()->id)
             ->where('folder_path', 'like', $folderPath . '/%')
             ->update(['folder_path' => null]);
+
+        // Delete folder record + all subfolder records
+        DB::table('media_folders')
+            ->where('user_id', $request->user()->id)
+            ->where(function ($q) use ($folderPath) {
+                $q->where('path', $folderPath)
+                  ->orWhere('path', 'like', $folderPath . '/%');
+            })
+            ->delete();
 
         return back()->with('message', "Folder '{$folderPath}' deleted. Media moved to root.");
     }
@@ -165,60 +180,57 @@ class MediaController extends Controller
     }
 
     /**
-     * Build a hierarchical folder tree from all media folder_paths.
-     * Returns array of { name, path, count, children: [...] }
+     * Build a hierarchical folder tree from media_folders table + media counts.
      */
     private function buildFolderTree(int $userId): array
     {
-        // Get all unique folder_paths + count of media in each
-        $folders = DB::table('media')
-            ->select('folder_path', DB::raw('COUNT(*) as count'))
+        // Get all folders for this user
+        $folders = DB::table('media_folders')
+            ->where('user_id', $userId)
+            ->orderBy('name')
+            ->get(['name', 'path', 'parent_path']);
+
+        // Get media count per folder_path
+        $mediaCounts = DB::table('media')
             ->where('user_id', $userId)
             ->whereNotNull('folder_path')
+            ->select('folder_path', DB::raw('COUNT(*) as count'))
             ->groupBy('folder_path')
-            ->get();
+            ->pluck('count', 'folder_path')
+            ->toArray();
 
-        // Build tree structure
-        $tree = [];
-        $folderMap = []; // path => node reference
+        // Build tree from flat list using parent_path
+        $folderMap = []; // path => node
+        $root = [];
 
+        // First pass: create all nodes
         foreach ($folders as $folder) {
-            $path = $folder->folder_path;
-            $parts = explode('/', $path);
-            $currentPath = '';
-            $parent = &$tree;
+            $node = [
+                'name' => $folder->name,
+                'path' => $folder->path,
+                'count' => $mediaCounts[$folder->path] ?? 0,
+                'children' => [],
+            ];
+            $folderMap[$folder->path] = $node;
+        }
 
-            foreach ($parts as $i => $part) {
-                $currentPath = $currentPath ? "{$currentPath}/{$part}" : $part;
-                $isLeaf = ($i === count($parts) - 1);
-
-                if (!isset($folderMap[$currentPath])) {
-                    $node = [
-                        'name' => $part,
-                        'path' => $currentPath,
-                        'count' => 0,
-                        'children' => [],
-                    ];
-                    $folderMap[$currentPath] = &$node;
-                    $parent[] = &$node;
-                }
-
-                // If this is the actual folder_path (leaf), add count
-                if ($isLeaf) {
-                    $folderMap[$currentPath]['count'] += $folder->count;
-                }
-
-                $parent = &$folderMap[$currentPath]['children'];
+        // Second pass: build parent-child relationships
+        foreach ($folders as $folder) {
+            $node = &$folderMap[$folder->path];
+            if ($folder->parent_path && isset($folderMap[$folder->parent_path])) {
+                $folderMap[$folder->parent_path]['children'][] = &$node;
+            } else {
+                $root[] = &$node;
             }
         }
 
-        // Sort tree by name
-        usort($tree, fn($a, $b) => strcmp($a['name'], $b['name']));
-        foreach ($tree as &$node) {
+        // Sort by name
+        usort($root, fn($a, $b) => strcmp($a['name'], $b['name']));
+        foreach ($root as &$node) {
             $this->sortTree($node['children']);
         }
 
-        return $tree;
+        return $root;
     }
 
     private function sortTree(array &$tree): void
