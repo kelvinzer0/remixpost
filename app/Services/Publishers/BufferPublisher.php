@@ -357,21 +357,30 @@ class BufferPublisher implements PublisherInterface
             // Build info message — notification mode needs special instructions
             if ($schedulingType === 'notification') {
                 $info = "Post scheduled in Buffer with **Notify Me** mode (status: {$status}). "
-                    . "Buffer will send a push notification to your mobile at the scheduled time. "
-                    . "Open the Buffer mobile app when notified to edit the post — add music, "
-                    . "stickers, effects, or sounds — then tap Publish to post natively to {$channelSvc}.";
+                    . "At scheduled time, Buffer will send a push notification to your mobile.\n\n"
+                    . "📱 FLOW (important — does NOT open TikTok/IG directly):\n"
+                    . "1. Notification arrives on your phone\n"
+                    . "2. Tap notification → Buffer mobile app opens (NOT TikTok/IG)\n"
+                    . "3. In Buffer app, tap 'Finish in {$channelSvc}' / 'Finish your post'\n"
+                    . "4. TikTok/IG app opens with media + caption pre-loaded\n"
+                    . "5. Add music, stickers, effects, sounds → tap Publish\n\n"
+                    . "This 2-step flow (Buffer app → TikTok/IG app) is required because "
+                    . "Buffer API cannot attach music/stickers directly. The handoff to "
+                    . "TikTok/IG native app enables full creative control.";
 
                 // Warn if no active mobile device registered
                 if ($hasActiveDevice === false) {
                     $info .= "\n\n⚠️ WARNING: No active mobile device detected for this Buffer account. "
                         . "You will NOT receive the push notification! "
-                        . "To fix: install the Buffer mobile app (iOS App Store / Google Play), "
-                        . "login with the same email used to connect this Buffer account, "
-                        . "and enable push notifications for the Buffer app in your phone settings. "
-                        . "After logging in, the device will be registered automatically.";
+                        . "To fix:\n"
+                        . "1. Install Buffer mobile app (iOS App Store / Google Play)\n"
+                        . "2. Login with the SAME email used to connect this Buffer account\n"
+                        . "3. Enable push notifications for Buffer app in phone settings\n"
+                        . "4. ALSO install TikTok/IG app (needed for step 4 above)\n"
+                        . "After login, device will be registered automatically.";
                 } else {
-                    $info .= "\n\nMake sure Buffer mobile app is installed and you're logged in "
-                        . "with the same account. Push notifications must be enabled in phone settings.";
+                    $info .= "\n\n✓ Mobile device detected. Make sure TikTok/IG app is also "
+                        . "installed (needed for the handoff in step 4).";
                 }
             } else {
                 $info = "Post created in Buffer (status: {$status}, mode: {$mode}). "

@@ -945,15 +945,24 @@ const minDate = () => {
                                 <div class="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900">
                                     <p class="font-semibold">⚠️ Prasyarat Mobile App</p>
                                     <p class="mt-0.5">
-                                        Pastikan <strong>Buffer mobile app</strong> terinstall di HP dan login dengan
-                                        email yang sama dengan akun Buffer yang connect di sini. Enable push
-                                        notifications di phone settings. Tanpa ini, notifikasi tidak akan diterima.
+                                        Flow Notify Me (2-langkah, BUKAN langsung buka TikTok/IG):
                                     </p>
-                                    <div class="mt-1 flex gap-2">
+                                    <ol class="mt-1 ml-4 list-decimal space-y-0.5">
+                                        <li>Notifikasi tiba → tap → <strong>Buffer app</strong> terbuka</li>
+                                        <li>Di Buffer app, tap "Finish in TikTok/IG"</li>
+                                        <li>TikTok/IG app terbuka dengan media + caption</li>
+                                        <li>Tambah sound/stickers → Publish native</li>
+                                    </ol>
+                                    <p class="mt-1.5">
+                                        <strong>Butuh 2 app terinstall:</strong> Buffer mobile app
+                                        (login email sama) + TikTok/IG app. Enable push notifications
+                                        untuk Buffer di phone settings.
+                                    </p>
+                                    <div class="mt-1 flex flex-wrap gap-2">
                                         <a href="https://apps.apple.com/app/buffer-plan-schedule-posts/id447471524" target="_blank"
-                                            class="text-amber-700 underline">iOS App Store</a>
+                                            class="text-amber-700 underline">Buffer iOS</a>
                                         <a href="https://play.google.com/store/apps/details?id=org.buffer.android" target="_blank"
-                                            class="text-amber-700 underline">Google Play</a>
+                                            class="text-amber-700 underline">Buffer Android</a>
                                     </div>
                                 </div>
 
