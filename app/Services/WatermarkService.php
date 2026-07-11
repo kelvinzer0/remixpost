@@ -10,13 +10,13 @@ use Illuminate\Support\Facades\Storage;
  * Watermark Service — apply text watermark to images and videos.
  *
  * Used to protect media content before publishing to social platforms.
- * Watermark text (e.g. @warunglakku) is composited onto the media using
- * the Raleway Dots font (Google Fonts).
+ * Watermark text (e.g. warunglakku.com) is composited onto the media using
+ * the Poppins Bold font (Google Fonts).
  *
  * Image watermarking:
  *   - Uses PHP GD (already installed)
  *   - Allocates a translucent color (custom opacity)
- *   - Renders text withimagettftext() using Raleway Dots TTF
+ *   - Renders text withimagettftext() using Poppins Bold TTF
  *   - Position: 9-point grid (top-left, top-center, ..., bottom-right)
  *   - Output: watermarked JPEG (quality 90) saved to storage/app/public/watermarked/
  *
@@ -31,9 +31,9 @@ use Illuminate\Support\Facades\Storage;
  *   middle-left  middle-center  middle-right
  *   bottom-left  bottom-center  bottom-right
  *
- * Font: Raleway Dots by Matt McInerney & Pablo Impallari (OFL license)
- *   https://fonts.google.com/specimen/Raleway+Dots
- *   Stored at: storage/fonts/RalewayDots-Regular.ttf
+ * Font: Poppins Bold by Indian Type Foundry (OFL license)
+ *   https://fonts.google.com/specimen/Poppins
+ *   Stored at: storage/fonts/Poppins-Bold.ttf
  *
  * @license Apache-2.0 (implementation, font under OFL)
  */
@@ -59,7 +59,7 @@ class WatermarkService
      * Default watermark settings.
      */
     public const DEFAULTS = [
-        'text' => '@warunglakku',
+        'text' => 'warunglakku.com',
         'position' => 'bottom-right',
         'font_size' => 24,        // points (image) / height pct relative (video)
         'opacity' => 60,          // 0-100

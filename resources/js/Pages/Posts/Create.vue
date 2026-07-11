@@ -16,7 +16,7 @@ const form = useForm({
     media_urls: [],
     watermark_settings: {
         enabled: false,
-        text: '@warunglakku',
+        text: 'warunglakku.com',
         position: 'bottom-right',
         font_size: 24,
         opacity: 60,
