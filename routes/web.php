@@ -78,6 +78,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/media/{id}/move', [\App\Http\Controllers\MediaController::class, 'move'])->name('media.move');
     Route::post('/media/folder/create', [\App\Http\Controllers\MediaController::class, 'createFolder'])->name('media.folder.create');
     Route::post('/media/folder/delete', [\App\Http\Controllers\MediaController::class, 'deleteFolder'])->name('media.folder.delete');
+    Route::post('/media/bulk/move', [\App\Http\Controllers\MediaController::class, 'bulkMove'])->name('media.bulk.move');
+    Route::post('/media/bulk/delete', [\App\Http\Controllers\MediaController::class, 'bulkDelete'])->name('media.bulk.delete');
     Route::delete('/media/{id}', [\App\Http\Controllers\MediaController::class, 'destroy'])->name('media.destroy');
 
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');

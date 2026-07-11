@@ -19,6 +19,13 @@ const moveTargetFolder = ref('');
 const expandedFolders = ref({});
 const showFolderSidebar = ref(false); // mobile toggle
 
+// Bulk selection state
+const selectedIds = ref(new Set());
+const selectMode = ref(false);
+const showBulkMoveModal = ref(false);
+const bulkMoveTargetFolder = ref('');
+const bulkActionInProgress = ref(false);
+
 const formatSize = (bytes) => {
     if (!bytes) return '?';
     if (bytes < 1024) return bytes + ' B';
@@ -148,6 +155,125 @@ const totalFolderCount = computed(() => {
     traverse(props.folderTree || []);
     return count;
 });
+
+// ===== Bulk operations =====
+
+const selectedCount = computed(() => selectedIds.value.size);
+
+const isAllSelected = computed(() => {
+    return props.media.data.length > 0 &&
+        props.media.data.every(item => selectedIds.value.has(item.id));
+});
+
+const toggleSelectMode = () => {
+    selectMode.value = !selectMode.value;
+    if (!selectMode.value) {
+        selectedIds.value.clear();
+        selectedIds.value = new Set();
+    }
+};
+
+const toggleSelect = (id) => {
+    const newSet = new Set(selectedIds.value);
+    if (newSet.has(id)) {
+        newSet.delete(id);
+    } else {
+        newSet.add(id);
+    }
+    selectedIds.value = newSet;
+};
+
+const toggleSelectAll = () => {
+    const newSet = new Set(selectedIds.value);
+    if (isAllSelected.value) {
+        // Deselect all on current page
+        props.media.data.forEach(item => newSet.delete(item.id));
+    } else {
+        // Select all on current page
+        props.media.data.forEach(item => newSet.add(item.id));
+    }
+    selectedIds.value = newSet;
+};
+
+const isSelected = (id) => selectedIds.value.has(id);
+
+const clearSelection = () => {
+    selectedIds.value = new Set();
+};
+
+// Get selected items' URLs (for copy all)
+const selectedItems = computed(() => {
+    return props.media.data.filter(item => selectedIds.value.has(item.id));
+});
+
+const copySelectedUrls = async () => {
+    if (selectedIds.value.size === 0) return;
+    const urls = selectedItems.value.map(item => item.url);
+    const text = urls.join('\n');
+    try {
+        await navigator.clipboard.writeText(text);
+        alert(`${urls.length} URLs copied to clipboard!`);
+    } catch (e) {
+        // Fallback: use textarea + execCommand for older browsers / non-secure contexts
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            alert(`${urls.length} URLs copied to clipboard!`);
+        } catch (err) {
+            alert('Failed to copy. Please copy manually.');
+        }
+        document.body.removeChild(textarea);
+    }
+};
+
+const openBulkMoveModal = () => {
+    if (selectedIds.value.size === 0) return;
+    bulkMoveTargetFolder.value = props.currentFolder || '';
+    showBulkMoveModal.value = true;
+};
+
+const doBulkMove = () => {
+    if (selectedIds.value.size === 0) return;
+    bulkActionInProgress.value = true;
+    useForm({
+        ids: Array.from(selectedIds.value),
+        folder_path: bulkMoveTargetFolder.value,
+    }).post('/media/bulk/move', {
+        onSuccess: () => {
+            showBulkMoveModal.value = false;
+            selectedIds.value = new Set();
+            selectMode.value = false;
+            bulkActionInProgress.value = false;
+        },
+        onError: () => {
+            bulkActionInProgress.value = false;
+        },
+    });
+};
+
+const doBulkDelete = () => {
+    if (selectedIds.value.size === 0) return;
+    const count = selectedIds.value.size;
+    if (!confirm(`Delete ${count} media item${count > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    bulkActionInProgress.value = true;
+    useForm({
+        ids: Array.from(selectedIds.value),
+    }).post('/media/bulk/delete', {
+        onSuccess: () => {
+            selectedIds.value = new Set();
+            selectMode.value = false;
+            bulkActionInProgress.value = false;
+        },
+        onError: () => {
+            bulkActionInProgress.value = false;
+        },
+    });
+};
 </script>
 
 <template>
@@ -275,12 +401,66 @@ const totalFolderCount = computed(() => {
 
                 <!-- Media grid -->
                 <div class="bg-white rounded-lg shadow p-3 sm:p-6">
+                    <!-- Bulk action toolbar -->
+                    <div v-if="media.data.length > 0" class="mb-4 flex flex-wrap items-center gap-2 pb-3 border-b border-gray-200">
+                        <button v-if="!selectMode" @click="toggleSelectMode"
+                            class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                            </svg>
+                            Select
+                        </button>
+                        <template v-else>
+                            <label class="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-gray-700 cursor-pointer">
+                                <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll"
+                                    class="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                                {{ isAllSelected ? 'Deselect all' : 'Select all' }}
+                            </label>
+                            <span v-if="selectedCount > 0" class="text-xs font-medium text-brand-700 bg-brand-50 px-2 py-1 rounded">
+                                {{ selectedCount }} selected
+                            </span>
+                            <div class="flex-1"></div>
+                            <button @click="copySelectedUrls" :disabled="selectedCount === 0"
+                                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                                </svg>
+                                Copy URLs
+                            </button>
+                            <button @click="openBulkMoveModal" :disabled="selectedCount === 0"
+                                class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                Move
+                            </button>
+                            <button @click="doBulkDelete" :disabled="selectedCount === 0 || bulkActionInProgress"
+                                class="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/>
+                                </svg>
+                                Delete
+                            </button>
+                            <button @click="toggleSelectMode"
+                                class="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800">
+                                Cancel
+                            </button>
+                        </template>
+                    </div>
+
                     <div v-if="media.data.length === 0" class="text-center py-12 text-gray-500">
                         No media in {{ currentFolder || 'Root' }}.
                     </div>
                     <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                         <div v-for="item in media.data" :key="item.id"
-                            class="group relative border border-gray-200 rounded-lg overflow-hidden bg-white">
+                            class="group relative border rounded-lg overflow-hidden bg-white cursor-pointer"
+                            :class="selectMode && isSelected(item.id) ? 'border-brand-500 ring-2 ring-brand-300' : 'border-gray-200'"
+                            @click="selectMode && toggleSelect(item.id)">
+                            <!-- Selection checkbox (visible in select mode) -->
+                            <div v-if="selectMode" class="absolute top-1.5 left-1.5 z-20">
+                                <input type="checkbox" :checked="isSelected(item.id)" @click.stop="toggleSelect(item.id)"
+                                    class="w-5 h-5 rounded border-white bg-white/90 text-brand-600 focus:ring-brand-500 shadow-sm" />
+                            </div>
                             <div class="aspect-square bg-gray-100 flex items-center justify-center">
                                 <img v-if="isImage(item.mime_type)" :src="item.url" :alt="item.original_name"
                                     class="w-full h-full object-cover" />
@@ -302,8 +482,8 @@ const totalFolderCount = computed(() => {
                                 <p class="text-xs font-medium text-gray-900 truncate" :title="item.original_name">{{ item.original_name }}</p>
                                 <p class="text-xs text-gray-500">{{ formatSize(item.size) }}</p>
                             </div>
-                            <!-- Actions overlay (desktop hover) -->
-                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition hidden sm:flex flex-col items-center justify-center space-y-1.5">
+                            <!-- Actions overlay (desktop hover) — hidden in select mode -->
+                            <div v-if="!selectMode" class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition hidden sm:flex flex-col items-center justify-center space-y-1.5">
                                 <button @click="copyUrl(item.url)"
                                     class="px-3 py-1 text-xs text-white bg-brand-600 rounded hover:bg-brand-700">Copy URL</button>
                                 <button @click="moveMedia(item.id)"
@@ -312,8 +492,8 @@ const totalFolderCount = computed(() => {
                                     class="px-3 py-1 text-xs text-white bg-red-600 rounded hover:bg-red-700"
                                     onclick="return confirm('Delete this media?')">Delete</Link>
                             </div>
-                            <!-- Actions bar (mobile, always visible) -->
-                            <div class="sm:hidden absolute bottom-0 left-0 right-0 bg-black/70 flex justify-around py-1.5">
+                            <!-- Actions bar (mobile, always visible) — hidden in select mode -->
+                            <div v-if="!selectMode" class="sm:hidden absolute bottom-0 left-0 right-0 bg-black/70 flex justify-around py-1.5">
                                 <button @click="copyUrl(item.url)" title="Copy URL"
                                     class="p-1.5 text-white hover:text-brand-300">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -377,6 +557,31 @@ const totalFolderCount = computed(() => {
                 <div class="flex justify-end gap-2 mt-4">
                     <button @click="showMoveModal = false" class="px-3 py-1.5 text-sm text-gray-600">Cancel</button>
                     <button @click="doMove" class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded">Move</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk move modal -->
+        <div v-if="showBulkMoveModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" @click.self="showBulkMoveModal = false">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                <h3 class="text-lg font-semibold mb-2">Move {{ selectedCount }} Media</h3>
+                <p class="text-xs text-gray-500 mb-4">Select destination folder for {{ selectedCount }} selected item{{ selectedCount > 1 ? 's' : '' }}.</p>
+                <select v-model="bulkMoveTargetFolder"
+                    class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-brand-500 focus:ring-brand-500">
+                    <option value="">Root</option>
+                    <option v-for="f in flatFolders.filter(f => f.path)" :key="f.path" :value="f.path">{{ f.name }}</option>
+                </select>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button @click="showBulkMoveModal = false" :disabled="bulkActionInProgress"
+                        class="px-3 py-1.5 text-sm text-gray-600 disabled:opacity-50">Cancel</button>
+                    <button @click="doBulkMove" :disabled="bulkActionInProgress"
+                        class="px-3 py-1.5 text-sm text-white bg-brand-600 rounded disabled:opacity-50 flex items-center gap-2">
+                        <svg v-if="bulkActionInProgress" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        {{ bulkActionInProgress ? 'Moving...' : 'Move' }}
+                    </button>
                 </div>
             </div>
         </div>

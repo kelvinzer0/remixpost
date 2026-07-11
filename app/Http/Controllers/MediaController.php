@@ -180,6 +180,61 @@ class MediaController extends Controller
     }
 
     /**
+     * Bulk move multiple media items to a target folder.
+     *
+     * Body: { ids: [1,2,3,...], folder_path: "target/folder" | "" }
+     */
+    public function bulkMove(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1|max:500',
+            'ids.*' => 'required|integer',
+            'folder_path' => 'nullable|string|max:500',
+        ]);
+
+        $folderPath = $validated['folder_path'] ?? '';
+        if ($folderPath) {
+            $folderPath = trim($folderPath, '/');
+        }
+
+        // Move all media owned by user with matching IDs (mass assignment safe
+        // — only updates folder_path, scoped to user's media)
+        $count = Media::where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->update(['folder_path' => $folderPath ?: null]);
+
+        $target = $folderPath ?: 'Root';
+        return back()->with('message', "{$count} media moved to {$target}.");
+    }
+
+    /**
+     * Bulk delete multiple media items.
+     *
+     * Body: { ids: [1,2,3,...] }
+     */
+    public function bulkDelete(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1|max:500',
+            'ids.*' => 'required|integer',
+        ]);
+
+        // Fetch media owned by user with matching IDs
+        $mediaItems = Media::where('user_id', $request->user()->id)
+            ->whereIn('id', $validated['ids'])
+            ->get(['id', 'path']);
+
+        $deleted = 0;
+        foreach ($mediaItems as $media) {
+            Storage::disk('public')->delete($media->path);
+            $media->delete();
+            $deleted++;
+        }
+
+        return back()->with('message', "{$deleted} media deleted.");
+    }
+
+    /**
      * Build a hierarchical folder tree from media_folders table + media counts.
      */
     private function buildFolderTree(int $userId): array
