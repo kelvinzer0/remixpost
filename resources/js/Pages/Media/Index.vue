@@ -17,6 +17,7 @@ const showMoveModal = ref(false);
 const moveTargetId = ref(null);
 const moveTargetFolder = ref('');
 const expandedFolders = ref({});
+const showFolderSidebar = ref(false); // mobile toggle
 
 const formatSize = (bytes) => {
     if (!bytes) return '?';
@@ -134,6 +135,19 @@ const flatFolders = computed(() => {
     traverse(props.folderTree);
     return result;
 });
+
+// Total folder count for the mobile toggle badge
+const totalFolderCount = computed(() => {
+    let count = 0;
+    const traverse = (nodes) => {
+        for (const node of nodes) {
+            count += node.count || 0;
+            if (node.children?.length) traverse(node.children);
+        }
+    };
+    traverse(props.folderTree || []);
+    return count;
+});
 </script>
 
 <template>
@@ -141,9 +155,26 @@ const flatFolders = computed(() => {
         <template #header>Media Manager</template>
         <Head title="Media Manager" />
 
-        <div class="flex gap-6">
+        <!-- Mobile folder toggle button -->
+        <div class="lg:hidden mb-4">
+            <button @click="showFolderSidebar = !showFolderSidebar"
+                class="w-full flex items-center justify-between px-4 py-2.5 bg-white rounded-lg shadow-sm border border-gray-200 text-sm font-medium text-gray-700">
+                <span class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-brand-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                    </svg>
+                    Folders
+                    <span v-if="currentFolder" class="text-xs text-gray-500 truncate max-w-[140px]">· {{ currentFolder }}</span>
+                </span>
+                <svg class="w-5 h-5 text-gray-400 transition-transform" :class="showFolderSidebar ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="flex flex-col lg:flex-row lg:gap-6">
             <!-- Folder sidebar -->
-            <div class="w-64 flex-shrink-0">
+            <div class="lg:w-64 lg:flex-shrink-0 mb-4 lg:mb-0" :class="showFolderSidebar ? 'block' : 'hidden lg:block'">
                 <div class="bg-white rounded-lg shadow p-4">
                     <div class="flex items-center justify-between mb-3">
                         <h3 class="text-sm font-semibold text-gray-900">Folders</h3>
@@ -164,7 +195,7 @@ const flatFolders = computed(() => {
                     </Link>
 
                     <!-- Folder tree (recursive) -->
-                    <div v-for="folder in folderTree" :key="folder.path" class="ml-2">
+                    <div v-for="folder in folderTree" :key="folder.path" class="ml-2 group">
                         <div class="flex items-center">
                             <button v-if="folder.children?.length" @click="toggleFolder(folder.path)"
                                 class="text-gray-400 hover:text-gray-600 p-0.5">
@@ -183,7 +214,7 @@ const flatFolders = computed(() => {
                                 <span class="text-[10px] text-gray-400">{{ folder.count }}</span>
                             </Link>
                             <button @click="deleteFolder(folder.path)"
-                                class="text-gray-300 hover:text-red-500 p-0.5 opacity-0 group-hover:opacity-100">
+                                class="text-gray-300 hover:text-red-500 p-0.5 lg:opacity-0 lg:group-hover:opacity-100">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/>
                                 </svg>
@@ -191,7 +222,7 @@ const flatFolders = computed(() => {
                         </div>
                         <!-- Children -->
                         <div v-if="folder.children?.length && isExpanded(folder.path)" class="ml-4 border-l border-gray-200 pl-2">
-                            <div v-for="child in folder.children" :key="child.path" class="flex items-center">
+                            <div v-for="child in folder.children" :key="child.path" class="flex items-center group">
                                 <Link :href="`/media?folder=${encodeURIComponent(child.path)}`"
                                     class="flex items-center gap-1.5 px-2 py-1 rounded text-sm flex-1 cursor-pointer"
                                     :class="currentFolder === child.path ? 'bg-brand-100 text-brand-700 font-medium' : 'text-gray-700 hover:bg-gray-100'">
@@ -210,20 +241,20 @@ const flatFolders = computed(() => {
             <!-- Main content -->
             <div class="flex-1 min-w-0">
                 <!-- Breadcrumb -->
-                <div v-if="currentFolder" class="mb-4 flex items-center gap-2 text-sm">
-                    <Link href="/media" class="text-brand-600 hover:underline">Root</Link>
+                <div v-if="currentFolder" class="mb-4 flex items-center gap-2 text-sm overflow-x-auto whitespace-nowrap pb-1">
+                    <Link href="/media" class="text-brand-600 hover:underline flex-shrink-0">Root</Link>
                     <template v-for="crumb in breadcrumbs" :key="crumb.path">
-                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                         </svg>
-                        <Link :href="`/media?folder=${encodeURIComponent(crumb.path)}`" class="text-brand-600 hover:underline">{{ crumb.name }}</Link>
+                        <Link :href="`/media?folder=${encodeURIComponent(crumb.path)}`" class="text-brand-600 hover:underline flex-shrink-0">{{ crumb.name }}</Link>
                     </template>
                 </div>
 
                 <!-- Upload area -->
                 <div class="mb-6">
                     <label class="block">
-                        <div class="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition">
+                        <div class="flex flex-col items-center justify-center p-4 sm:p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition">
                             <svg v-if="!uploading" class="w-10 h-10 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                             </svg>
@@ -231,11 +262,11 @@ const flatFolders = computed(() => {
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                             </svg>
-                            <p class="text-sm font-medium text-gray-700">
+                            <p class="text-sm font-medium text-gray-700 text-center">
                                 {{ uploading ? 'Uploading...' : 'Click to upload' }}
                                 <span v-if="currentFolder"> to {{ currentFolder }}</span>
                             </p>
-                            <p class="text-xs text-gray-500 mt-1">PNG · JPG · GIF · WebP · MP4 · MOV · PDF — up to 100MB</p>
+                            <p class="text-xs text-gray-500 mt-1 text-center">PNG · JPG · GIF · WebP · MP4 · MOV · PDF — up to 100MB</p>
                         </div>
                         <input type="file" class="hidden" @change="uploadFile" accept="image/*,video/*,.pdf" :disabled="uploading" />
                     </label>
@@ -243,26 +274,26 @@ const flatFolders = computed(() => {
                 </div>
 
                 <!-- Media grid -->
-                <div class="bg-white rounded-lg shadow p-6">
+                <div class="bg-white rounded-lg shadow p-3 sm:p-6">
                     <div v-if="media.data.length === 0" class="text-center py-12 text-gray-500">
                         No media in {{ currentFolder || 'Root' }}.
                     </div>
-                    <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
                         <div v-for="item in media.data" :key="item.id"
-                            class="group relative border border-gray-200 rounded-lg overflow-hidden">
+                            class="group relative border border-gray-200 rounded-lg overflow-hidden bg-white">
                             <div class="aspect-square bg-gray-100 flex items-center justify-center">
                                 <img v-if="isImage(item.mime_type)" :src="item.url" :alt="item.original_name"
                                     class="w-full h-full object-cover" />
                                 <div v-else-if="isVideo(item.mime_type)" class="flex flex-col items-center justify-center">
-                                    <svg class="w-10 h-10 text-gray-700" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
+                                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-gray-700" fill="currentColor" viewBox="0 0 20 20"><path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4z"/><path fill="#fff" d="M8 6l6 4-6 4V6z"/></svg>
                                     <span class="text-[10px] text-gray-500 mt-1 font-semibold">VIDEO</span>
                                 </div>
                                 <div v-else-if="isPdf(item.mime_type)" class="flex flex-col items-center justify-center">
-                                    <svg class="w-10 h-10 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
+                                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-rose-600" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h6l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/></svg>
                                     <span class="text-[10px] text-rose-700 mt-1 font-semibold">PDF</span>
                                 </div>
                                 <div v-else class="flex items-center justify-center">
-                                    <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                     </svg>
                                 </div>
@@ -271,8 +302,8 @@ const flatFolders = computed(() => {
                                 <p class="text-xs font-medium text-gray-900 truncate" :title="item.original_name">{{ item.original_name }}</p>
                                 <p class="text-xs text-gray-500">{{ formatSize(item.size) }}</p>
                             </div>
-                            <!-- Actions overlay -->
-                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center space-y-1.5">
+                            <!-- Actions overlay (desktop hover) -->
+                            <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition hidden sm:flex flex-col items-center justify-center space-y-1.5">
                                 <button @click="copyUrl(item.url)"
                                     class="px-3 py-1 text-xs text-white bg-brand-600 rounded hover:bg-brand-700">Copy URL</button>
                                 <button @click="moveMedia(item.id)"
@@ -281,14 +312,36 @@ const flatFolders = computed(() => {
                                     class="px-3 py-1 text-xs text-white bg-red-600 rounded hover:bg-red-700"
                                     onclick="return confirm('Delete this media?')">Delete</Link>
                             </div>
+                            <!-- Actions bar (mobile, always visible) -->
+                            <div class="sm:hidden absolute bottom-0 left-0 right-0 bg-black/70 flex justify-around py-1.5">
+                                <button @click="copyUrl(item.url)" title="Copy URL"
+                                    class="p-1.5 text-white hover:text-brand-300">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                                    </svg>
+                                </button>
+                                <button @click="moveMedia(item.id)" title="Move"
+                                    class="p-1.5 text-white hover:text-blue-300">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                    </svg>
+                                </button>
+                                <Link :href="`/media/${item.id}`" method="delete" as="button" title="Delete"
+                                    class="p-1.5 text-white hover:text-red-300"
+                                    onclick="return confirm('Delete this media?')">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/>
+                                    </svg>
+                                </Link>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Pagination -->
                     <div v-if="media.last_page > 1" class="mt-6 flex justify-center">
-                        <nav class="flex space-x-1">
+                        <nav class="flex space-x-1 overflow-x-auto max-w-full">
                             <Link v-for="link in media.links" :key="link.label" :href="link.url || '#'"
-                                class="px-3 py-2 text-sm rounded-md"
+                                class="px-3 py-2 text-sm rounded-md whitespace-nowrap flex-shrink-0"
                                 :class="link.active ? 'bg-brand-600 text-white' : 'bg-white text-gray-700 border border-gray-300'"
                                 v-html="link.label"></Link>
                         </nav>
