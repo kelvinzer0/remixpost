@@ -103,11 +103,23 @@ class LinkedInPublisher implements PublisherInterface
             // Handle media — LinkedIn only allows one media category per post.
             // Priority: documents > videos > images (docs are rarer + most specific)
             //
-            // CRITICAL: each media object MUST include a "category" field
-            // (DOCUMENT, VIDEO, IMAGE) — omitting it causes 400 error:
-            //   "media type validation failed for category"
-            // LinkedIn Posts API 2024+ requires this field per the docs:
-            // https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api
+            // Media structure per LinkedIn Posts API docs (verified 2026-07-12):
+            //   Document: { "title": "filename.pdf", "id": "urn:li:document:..." }
+            //   Video:    { "title": "video title",  "id": "urn:li:video:..." }
+            //   Image:    { "altText": "...",         "id": "urn:li:image:..." }
+            //   Multi:    { "multiImage": { "images": [{"id": "..."}, ...] } }
+            //
+            // IMPORTANT: do NOT include a "category" field — LinkedIn rejects it
+            // with 422 "unrecognized field found but not allowed". The category
+            // is inferred from the URN type (urn:li:document, urn:li:video, etc).
+            //
+            // Previous bug: post 103 failed with "media type validation failed
+            // for category" — that was a misleading error from LinkedIn when the
+            // media object had ONLY { id } without a title for documents.
+            // Adding the title field fixes the document post.
+            //
+            // Ref: https://learn.microsoft.com/en-us/linkedin/marketing/
+            //      community-management/shares/posts-api
             if (!empty($documentUrls)) {
                 // PDF document post — LinkedIn renders PDFs as a swipeable
                 // carousel of pages (1:1 aspect ratio per page).
@@ -120,10 +132,12 @@ class LinkedInPublisher implements PublisherInterface
                         'error' => 'LinkedIn document upload failed: ' . $result['error'],
                     ];
                 }
+                // Title is required for documents — use the filename from URL
+                $docTitle = basename(parse_url($url, PHP_URL_PATH));
                 $postPayload['content'] = [
                     'media' => [
+                        'title' => $docTitle,
                         'id' => $result['assetUrn'],
-                        'category' => 'DOCUMENT',
                     ],
                 ];
             } elseif (!empty($videoUrls)) {
@@ -138,8 +152,8 @@ class LinkedInPublisher implements PublisherInterface
                 }
                 $postPayload['content'] = [
                     'media' => [
+                        'title' => mb_substr($content, 0, 100),
                         'id' => $result['assetUrn'],
-                        'category' => 'VIDEO',
                     ],
                 ];
             } elseif (!empty($imageUrls)) {
@@ -155,7 +169,6 @@ class LinkedInPublisher implements PublisherInterface
                         $postPayload['content'] = [
                             'media' => [
                                 'id' => $mediaIds[0],
-                                'category' => 'IMAGE',
                             ],
                         ];
                     } else {
