@@ -26,6 +26,7 @@ const form = useForm({
         opacity: 60,
         applied_to: [],
     },
+    linkedin_doc_title: props.post.linkedin_doc_title || '',
     tags: props.post.tags || [],
     tagInput: '',
     first_comment: props.post.first_comment || '',
@@ -101,6 +102,19 @@ const watermarkPositionClass = (position) => {
 };
 
 const showWatermarkPanel = ref(false);
+
+// ===== LinkedIn document title (for PDF posts) =====
+const hasLinkedInAccount = computed(() => {
+    return props.accounts.some(a =>
+        a.provider === 'linkedin' && form.account_ids.includes(a.id)
+    );
+});
+
+const hasPdfMedia = computed(() => {
+    return form.media_urls.some(url => isPdfUrl(url));
+});
+
+const showLinkedInDocTitle = computed(() => hasLinkedInAccount.value && hasPdfMedia.value);
 
 // ===== Buffer per-account overrides (Pinterest board + IG mode) =====
 const bufferBoards = ref({}); // { accountId: [{ serviceId, name }] }
@@ -1016,6 +1030,21 @@ const supportsTags = computed(() => {
                             Video watermark memerlukan ffmpeg re-encode (lebih lambat saat publish).
                         </p>
                     </div>
+                </div>
+
+                <!-- LinkedIn Document Title (only when LinkedIn selected + PDF attached) -->
+                <div v-if="showLinkedInDocTitle">
+                    <label class="block text-sm font-medium text-gray-700">
+                        📄 LinkedIn Document Title
+                        <span class="ml-1 text-xs font-normal text-gray-500">(judul PDF yang tampil di LinkedIn)</span>
+                    </label>
+                    <input v-model="form.linkedin_doc_title" type="text" maxlength="200"
+                        placeholder="Otomatis pakai nama file PDF jika kosong"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm" />
+                    <p class="mt-1 text-xs text-gray-500">
+                        Title ini muncul sebagai judul document carousel di LinkedIn feed.
+                        Maks 200 karakter. Kosongkan untuk pakai nama file PDF.
+                    </p>
                 </div>
 
                 <!-- Tags -->

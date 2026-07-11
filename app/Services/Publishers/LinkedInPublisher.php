@@ -86,6 +86,10 @@ class LinkedInPublisher implements PublisherInterface
                 }
             }
 
+            // Read LinkedIn-specific document title from post (user can customize
+            // via Create/Edit Post UI). Falls back to PDF filename if not set.
+            $linkedinDocTitle = $post['linkedin_doc_title'] ?? null;
+
             // Build the post payload base (REST Posts API)
             $postPayload = [
                 'author' => $authorUrn,
@@ -132,11 +136,12 @@ class LinkedInPublisher implements PublisherInterface
                         'error' => 'LinkedIn document upload failed: ' . $result['error'],
                     ];
                 }
-                // Title is required for documents — use the filename from URL
-                $docTitle = basename(parse_url($url, PHP_URL_PATH));
+                // Title is required for documents — use user-provided title,
+                // fallback to PDF filename
+                $docTitle = $linkedinDocTitle ?: basename(parse_url($url, PHP_URL_PATH));
                 $postPayload['content'] = [
                     'media' => [
-                        'title' => $docTitle,
+                        'title' => mb_substr($docTitle, 0, 200),
                         'id' => $result['assetUrn'],
                     ],
                 ];

@@ -24,6 +24,7 @@ class Post extends Model
         'tags',
         'first_comment',
         'alt_text',
+        'linkedin_doc_title',
         'account_overrides',
         'scheduled_at',
         'published_at',
