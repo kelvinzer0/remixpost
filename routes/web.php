@@ -97,6 +97,11 @@ Route::middleware('auth')->group(function () {
     Route::delete('/odoo-carousel/{slideId}', [\App\Http\Controllers\OdooCarouselController::class, 'destroy'])->name('odoo-carousel.destroy');
     Route::post('/odoo-carousel/{slideId}/toggle', [\App\Http\Controllers\OdooCarouselController::class, 'toggle'])->name('odoo-carousel.toggle');
 
+    // API Keys management
+    Route::get('/settings/api-keys', [\App\Http\Controllers\ApiKeyController::class, 'index'])->name('api-keys.index');
+    Route::post('/settings/api-keys', [\App\Http\Controllers\ApiKeyController::class, 'store'])->name('api-keys.store');
+    Route::delete('/settings/api-keys/{id}', [\App\Http\Controllers\ApiKeyController::class, 'destroy'])->name('api-keys.destroy');
+
     // Analytics
     Route::get('/analytics', [\App\Http\Controllers\AnalyticsController::class, 'index'])->name('analytics.index');
     Route::post('/analytics/refresh', [\App\Http\Controllers\AnalyticsController::class, 'refresh'])->name('analytics.refresh');

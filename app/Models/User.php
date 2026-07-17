@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use App\Models\ApiKey;
 
 class User extends Authenticatable
 {
@@ -43,5 +44,10 @@ class User extends Authenticatable
     public function media()
     {
         return $this->hasMany(Media::class);
+    }
+
+    public function apiKeys()
+    {
+        return $this->hasMany(ApiKey::class);
     }
 }
