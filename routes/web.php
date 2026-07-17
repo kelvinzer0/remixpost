@@ -92,6 +92,11 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
 
+    // Odoo Carousel management
+    Route::get('/odoo-carousel', [\App\Http\Controllers\OdooCarouselController::class, 'index'])->name('odoo-carousel.index');
+    Route::delete('/odoo-carousel/{slideId}', [\App\Http\Controllers\OdooCarouselController::class, 'destroy'])->name('odoo-carousel.destroy');
+    Route::post('/odoo-carousel/{slideId}/toggle', [\App\Http\Controllers\OdooCarouselController::class, 'toggle'])->name('odoo-carousel.toggle');
+
     // Analytics
     Route::get('/analytics', [\App\Http\Controllers\AnalyticsController::class, 'index'])->name('analytics.index');
     Route::post('/analytics/refresh', [\App\Http\Controllers\AnalyticsController::class, 'refresh'])->name('analytics.refresh');
