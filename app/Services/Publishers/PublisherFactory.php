@@ -22,6 +22,7 @@ class PublisherFactory
             'discord' => new DiscordPublisher(),
             'buffer' => new BufferPublisher(),
             'whatsapp' => new WhatsAppPublisher(),
+            'odoo_carousel' => new OdooCarouselPublisher(),
             default => throw new InvalidArgumentException("Unknown provider: {$provider}"),
         };
     }

@@ -66,6 +66,18 @@ const connectDiscord = () => {
     });
 };
 
+// Odoo Carousel connect — API key based (no OAuth)
+const odooCarouselForm = useForm({
+    api_key: '',
+    name: '',
+});
+
+const connectOdooCarousel = () => {
+    odooCarouselForm.post('/integrations/social/connect-odoo-carousel', {
+        onSuccess: () => odooCarouselForm.reset(),
+    });
+};
+
 // Buffer connect — triggers OAuth+PKCE flow, no form fields needed
 const bufferForm = useForm({});
 
@@ -332,6 +344,46 @@ const manualProviders = providers.filter(p => !p.oauth);
                         <button type="submit" :disabled="discordForm.processing"
                             class="w-full py-2 text-xs font-medium text-center text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">
                             {{ discordForm.processing ? 'Validating webhook...' : 'Connect Discord Webhook' }}
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Odoo Carousel -->
+                <div class="bg-white p-6 rounded-lg shadow">
+                    <div class="flex items-center mb-4">
+                        <div class="flex items-center justify-center w-10 h-10 rounded-full text-white text-lg font-bold bg-orange-600">
+                            🎠
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-gray-900">Odoo Carousel</p>
+                            <p class="text-xs text-gray-500">Website slider (warunglakku.com)</p>
+                        </div>
+                    </div>
+                    <div class="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800">
+                        <p class="font-medium mb-1">Setup:</p>
+                        <ol class="list-decimal ml-4 space-y-0.5">
+                            <li>Generate API key di Odoo backend (prefix <code>wlc_</code>)</li>
+                            <li>Paste API key below</li>
+                            <li>Post dengan image akan auto-create slide (desktop 2:1 + mobile 4:5)</li>
+                        </ol>
+                    </div>
+                    <form @submit.prevent="connectOdooCarousel" class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">API Key</label>
+                            <input v-model="odooCarouselForm.api_key" type="text" required
+                                placeholder="wlc_xxxxxxxxxxxxxxxx"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm font-mono" />
+                            <p v-if="odooCarouselForm.errors.api_key" class="mt-1 text-xs text-red-600">{{ odooCarouselForm.errors.api_key }}</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Label (optional)</label>
+                            <input v-model="odooCarouselForm.name" type="text"
+                                placeholder="Warung Lakku Carousel"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 text-sm" />
+                        </div>
+                        <button type="submit" :disabled="odooCarouselForm.processing"
+                            class="w-full py-2 text-xs font-medium text-center text-white bg-orange-600 rounded-md hover:bg-orange-700 disabled:opacity-50">
+                            {{ odooCarouselForm.processing ? 'Validating API key...' : 'Connect Odoo Carousel' }}
                         </button>
                     </form>
                 </div>

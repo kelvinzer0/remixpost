@@ -60,6 +60,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/integrations/social/connect-telegram', [SocialAccountController::class, 'connectTelegram'])->name('social-accounts.connect-telegram');
     Route::post('/integrations/social/verify-telegram', [SocialAccountController::class, 'verifyTelegram'])->name('social-accounts.verify-telegram');
     Route::post('/integrations/social/connect-email', [SocialAccountController::class, 'connectEmail'])->name('social-accounts.connect-email');
+    Route::post('/integrations/social/connect-odoo-carousel', [SocialAccountController::class, 'connectOdooCarousel'])->name('social-accounts.connect-odoo-carousel');
     // Discord — manual webhook URL input (no OAuth needed)
     Route::post('/integrations/social/connect-discord', [SocialAccountController::class, 'connectDiscord'])->name('social-accounts.connect-discord');
     Route::post('/integrations/social/connect-whatsapp', [SocialAccountController::class, 'connectWhatsApp'])->name('social-accounts.connect-whatsapp');

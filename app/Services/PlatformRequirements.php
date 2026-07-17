@@ -244,6 +244,22 @@ class PlatformRequirements
                 'max_media_count' => 10, // multi-post sequential (1 media per WA API call, 2s delay)
                 'notes' => 'Via Evolution API (Baileys). Pilih target: User / Group / Channel / Story. Multi-media: dikirim berurutan (1 media per pesan, 2s delay). Story butuh media.',
             ],
+            'odoo_carousel' => [
+                'label' => 'Odoo Carousel',
+                'color' => 'bg-orange-600',
+                'requires_media' => true,
+                'media_type' => 'image',
+                'allows_text_only' => false,
+                'supports_image' => true,
+                'supports_video' => false,
+                'supports_pdf' => false,
+                'supports_tags' => false,
+                'supports_first_comment' => false,
+                'max_content_length' => 100,
+                'max_media_size_mb' => 10,
+                'max_media_count' => 1,
+                'notes' => 'Website carousel slider (warunglakku.com). Image auto-cropped to desktop 2:1 + mobile 4:5. Title from post content.',
+            ],
         ];
     }
 

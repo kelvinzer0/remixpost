@@ -906,6 +906,51 @@ class SocialAccountController extends Controller
     }
 
     /**
+     * Connect Odoo Carousel account (API key based — no OAuth).
+     *
+     * User provides API key (wlc_xxx) from Odoo backend. We validate
+     * by calling GET /carousel/api/slides — if 200, key is valid.
+     */
+    public function connectOdooCarousel(Request $request)
+    {
+        $validated = $request->validate([
+            'api_key' => 'required|string|starts_with:wlc_|max:100',
+            'name' => 'nullable|string|max:255',
+        ]);
+
+        $apiKey = $validated['api_key'];
+
+        // Validate API key by listing slides
+        $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+            ->get('https://warunglakku.com/carousel/api/slides');
+
+        if (!$response->ok()) {
+            return back()->with('error', "Odoo Carousel API key validation failed (HTTP {$response->status()}). Check your API key.");
+        }
+
+        $accountName = $validated['name'] ?: 'Odoo Carousel';
+
+        SocialAccount::updateOrCreate(
+            [
+                'provider' => 'odoo_carousel',
+                'provider_id' => 'warunglakku_carousel',
+            ],
+            [
+                'user_id' => $request->user()->id,
+                'name' => $accountName,
+                'username' => 'warunglakku.com',
+                'avatar' => null,
+                'access_token' => $apiKey,
+                'refresh_token' => null,
+                'is_active' => true,
+            ]
+        );
+
+        return redirect()->route('social-accounts.index')
+            ->with('message', "Odoo Carousel account '{$accountName}' connected successfully.");
+    }
+
+    /**
      * Store selected Facebook Page as a social account.
      */
     public function selectFacebookPage(Request $request)
