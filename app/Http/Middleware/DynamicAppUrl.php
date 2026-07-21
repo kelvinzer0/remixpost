@@ -13,6 +13,7 @@ use Symfony\Component\HttpFoundation\Response;
  * Detects the request host and dynamically configures:
  * - APP_URL: based on the actual host being accessed
  * - APP_FORCE_HTTPS: true for domain names, false for IP addresses
+ * - Session cookies: domain, secure flag, same_site
  *
  * This allows the app to be accessed from multiple domains/IPs
  * without manual .env configuration.
@@ -38,6 +39,14 @@ class DynamicAppUrl
 
         // Override APP_URL in config at runtime
         config(['app.url' => $dynamicUrl]);
+
+        // Configure session dynamically based on request context
+        config(['session.domain' => $host]);
+        config(['session.secure' => !$isIpAddress]);
+        config(['session.same_site' => $isIpAddress ? 'lax' : 'none']);
+
+        // Configure CSRF cookie to match session settings
+        config(['session.secure_cookie' => !$isIpAddress]);
 
         // Force HTTPS only for domain names (not IP addresses)
         if (!$isIpAddress) {

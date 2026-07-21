@@ -17,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
+        // CSRF cookie domain will be set dynamically by DynamicAppUrl middleware
+
         // Proxy trust is now handled by DynamicAppUrl middleware
         // which auto-detects domain vs IP access
 
