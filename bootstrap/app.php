@@ -13,13 +13,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->web(append: [
+            \App\Http\Middleware\DynamicAppUrl::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
-        // Trust all proxies when behind reverse proxy / tunnel
-        if (env('APP_FORCE_HTTPS', false)) {
-            $middleware->trustProxies(at: '*');
-        }
+        // Proxy trust is now handled by DynamicAppUrl middleware
+        // which auto-detects domain vs IP access
 
         $middleware->alias([
             'auth' => \App\Http\Middleware\Authenticate::class,
