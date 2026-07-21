@@ -1,5 +1,5 @@
 <script setup>
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import { ref, computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -66,39 +66,30 @@ const formatSize = (bytes) => {
     return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 };
 
-const uploadFile = async (event) => {
+const uploadFile = (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     uploading.value = true;
     uploadError.value = '';
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('folder_path', props.currentFolder || '');
+    const form = new FormData();
+    form.append('file', file);
+    form.append('folder_path', props.currentFolder || '');
 
-    try {
-        const response = await fetch('/media', {
-            method: 'POST',
-            headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-                'Accept': 'application/json',
-            },
-            body: formData,
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.message || 'Upload failed');
-        }
-
-        window.location.reload();
-    } catch (e) {
-        uploadError.value = e.message;
-    } finally {
-        uploading.value = false;
-        event.target.value = '';
-    }
+    router.post('/media', form, {
+        forceFormData: true,
+        onSuccess: () => {
+            router.reload();
+        },
+        onError: (errors) => {
+            uploadError.value = errors.file || errors.message || 'Upload failed';
+        },
+        onFinish: () => {
+            uploading.value = false;
+            event.target.value = '';
+        },
+    });
 };
 
 const copyUrl = (url) => {
